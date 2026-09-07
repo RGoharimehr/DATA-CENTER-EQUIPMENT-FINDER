@@ -33,6 +33,8 @@ def _connections_compatible(a: str | None, b: str | None) -> bool:
         return True
     an = _normalize_connection(a)
     bn = _normalize_connection(b)
+    if an is None or bn is None:
+        return True
     if an == bn:
         return True
     return bn in _CONNECTION_EQUIVALENTS.get(an, {an})

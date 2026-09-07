@@ -36,11 +36,11 @@ class EquipmentService:
             "brands": brands,
             "subtypes_by_category": subtypes_by_category,
             "input_hints": {
-                "valve": ["size_mm", "component_subtype", "cv_or_kv"],
-                "strainer": ["size_mm", "kv_or_cv"],
-                "filter_dryer": ["size_mm", "capacity_kw_or_tons"],
-                "cdu": ["size_mm", "capacity_kw_or_tons"],
-                "chiller": ["size_mm", "capacity_kw_or_tons"],
+                "valve": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "cv_or_kv"],
+                "strainer": ["size_mm", "connection_size_mm_or_inch", "kv_or_cv"],
+                "filter_dryer": ["size_mm", "connection_size_mm_or_inch", "capacity_kw_or_tons"],
+                "cdu": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "capacity_kw_or_tons"],
+                "chiller": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "capacity_kw_or_tons"],
             },
             "assistant_modes": ["local", "remote", "hybrid"],
         }
@@ -81,6 +81,8 @@ class EquipmentService:
         kv: float | None = None,
         capacity_kw: float | None = None,
         capacity_tons: float | None = None,
+        connection_size_mm: float | None = None,
+        connection_size_inch: float | None = None,
         top_n: int = 5,
     ) -> list[dict[str, Any]]:
         matches = find_closest_components(
@@ -93,6 +95,8 @@ class EquipmentService:
             target_kv=kv,
             target_capacity_kw=capacity_kw,
             target_capacity_tons=capacity_tons,
+            target_connection_size_mm=connection_size_mm,
+            target_connection_size_inch=connection_size_inch,
             top_n=top_n,
         )
         return [{"score": m.score, "component": asdict(m.component)} for m in matches]

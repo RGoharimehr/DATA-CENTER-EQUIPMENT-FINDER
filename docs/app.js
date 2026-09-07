@@ -1,7 +1,9 @@
 let CATALOG = [];
 
 const KV_PER_CV = 0.865;
+const MM_PER_INCH = 25.4;
 const toNum = (v) => (v === "" || v == null ? null : Number(v));
+const normalizeTerm = (v) => String(v || "").toLowerCase().replace(/[_-]/g, " ");
 
 function coeffForTarget(item, cv, kv) {
   if (item.flow_coefficient_value == null || !item.flow_coefficient_type) return null;
@@ -29,6 +31,10 @@ function findMatches(params) {
   const scored = filtered.map((c) => {
     let score = 0;
     score += ndelta(toNum(c.nominal_size_mm), params.size_mm, 0.2);
+    if (params.connection_size_mm != null) {
+      const connMm = toNum(c.nominal_size_mm) ?? (toNum(c.nominal_size_inch) != null ? toNum(c.nominal_size_inch) * MM_PER_INCH : null);
+      score += 1.2 * ndelta(connMm, params.connection_size_mm, 0.35);
+    }
     const allowsFlow = ["valve", "strainer"].includes(String(c.category || "").toLowerCase());
     if (allowsFlow && (params.cv != null || params.kv != null)) {
       score += ndelta(coeffForTarget(c, params.cv, params.kv), params.cv ?? params.kv, 0.6);
@@ -126,11 +132,19 @@ function bindUi() {
       component_subtype: document.getElementById("subtype").value.trim() || null,
       brand: document.getElementById("brand").value.trim() || null,
       size_mm: toNum(document.getElementById("size").value),
+      connection_size_mm: toNum(document.getElementById("connSizeMm").value),
+      connection_size_inch: toNum(document.getElementById("connSizeInch").value),
       cv: toNum(document.getElementById("cv").value),
       kv: toNum(document.getElementById("kv").value),
       capacity_kw: toNum(document.getElementById("cap").value),
       top_n: Number(document.getElementById("topn").value || 5)
     };
+    if (params.connection_size_mm == null && params.connection_size_inch != null) {
+      params.connection_size_mm = params.connection_size_inch * MM_PER_INCH;
+    }
+    if (params.size_mm == null && params.connection_size_mm != null) {
+      params.size_mm = params.connection_size_mm;
+    }
     const out = findMatches(params);
     document.getElementById("findOut").textContent = JSON.stringify(out, null, 2);
   });
@@ -171,11 +185,15 @@ function bindUi() {
     }
 
     const q = query.toLowerCase();
-    const pick = (arr) => arr.find((x) => q.includes(String(x).toLowerCase())) || null;
+    const normalizedQuery = normalizeTerm(q);
+    const pick = (arr) => arr.find((x) => normalizedQuery.includes(normalizeTerm(x))) || null;
     const categories = [...new Set(CATALOG.map((x) => x.category))];
     const brands = [...new Set(CATALOG.map((x) => x.brand))];
     const subtypes = [...new Set(CATALOG.map((x) => x.component_subtype).filter(Boolean))];
     const mm = (q.match(/(\\d+(?:\\.\\d+)?)\\s*mm/) || [])[1];
+    const connLeading = q.match(/(?:pipe|piping|connection|port|line|diameter)\\s*(?:size)?\\s*(?:of|=|:)?\\s*(\\d+(?:\\.\\d+)?)\\s*(mm|in|inch|inches|")/);
+    const connTrailing = q.match(/(\\d+(?:\\.\\d+)?)\\s*(mm|in|inch|inches|")\\s*(?:pipe|piping|connection|port|line|diameter)/);
+    const conn = connLeading || connTrailing;
     const cv = (q.match(/(?:^|\\s)cv\\s*[:=]?\\s*(\\d+(?:\\.\\d+)?)/) || [])[1];
     const kv = (q.match(/(?:^|\\s)kv\\s*[:=]?\\s*(\\d+(?:\\.\\d+)?)/) || [])[1];
     const kw = (q.match(/(\\d+(?:\\.\\d+)?)\\s*k\\s*w/) || [])[1];
@@ -187,12 +205,21 @@ function bindUi() {
       component_subtype: pick(subtypes),
       brand: pick(brands),
       size_mm: mm ? Number(mm) : null,
+      connection_size_mm: conn ? Number(conn[1]) * (conn[2] === "mm" ? 1 : MM_PER_INCH) : null,
+      connection_size_inch: conn && conn[2] !== "mm" ? Number(conn[1]) : null,
       cv: cv ? Number(cv) : null,
       kv: kv ? Number(kv) : null,
       capacity_kw: kw ? Number(kw) : null,
       capacity_tons: tons ? Number(tons) : null,
       top_n: Math.max(1, Math.min(top, 20))
     };
+    if (filters.size_mm == null && filters.connection_size_mm != null) {
+      filters.size_mm = filters.connection_size_mm;
+    }
+    if (["cdu", "chiller", "filter_dryer"].includes(String(filters.category || "").toLowerCase())) {
+      filters.cv = null;
+      filters.kv = null;
+    }
     const matches = findMatches(filters);
     document.getElementById("aiOut").textContent = JSON.stringify({
       ok: true,

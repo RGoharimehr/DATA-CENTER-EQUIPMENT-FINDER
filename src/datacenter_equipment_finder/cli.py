@@ -9,6 +9,7 @@ from .compatibility import check_compatibility
 from .dataset_pipeline import build_catalog_from_vendor_sources
 from .explanations import explain_category, explain_property
 from .matching import find_closest_components
+from .pdf_catalog import build_database_from_pdf
 from .service import EquipmentService
 from .web import run_server
 
@@ -26,6 +27,8 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--kv", type=float, required=False)
     f.add_argument("--capacity-kw", type=float, required=False)
     f.add_argument("--capacity-tons", type=float, required=False)
+    f.add_argument("--connection-size-mm", type=float, required=False)
+    f.add_argument("--connection-size-inch", type=float, required=False)
     f.add_argument("--top-n", type=int, default=5)
 
     c = sub.add_parser("compat", help="Check compatibility for part numbers")
@@ -62,6 +65,12 @@ def _build_parser() -> argparse.ArgumentParser:
     db.add_argument("--csv-path", default="src/datacenter_equipment_finder/data/equipment_catalog.csv")
     db.add_argument("--db-path", default="src/datacenter_equipment_finder/data/equipment_catalog.sqlite")
 
+    pdf = sub.add_parser("build-db-from-pdf", help="Extract catalog rows from PDF and build CSV/SQLite output")
+    pdf.add_argument("pdf_path")
+    pdf.add_argument("--db-path", required=True)
+    pdf.add_argument("--csv-path", default=None)
+    pdf.add_argument("--max-pages", type=int, default=None)
+
     return parser
 
 
@@ -83,6 +92,8 @@ def main() -> int:
             target_kv=args.kv,
             target_capacity_kw=args.capacity_kw,
             target_capacity_tons=args.capacity_tons,
+            target_connection_size_mm=args.connection_size_mm,
+            target_connection_size_inch=args.connection_size_inch,
             top_n=args.top_n,
         )
         for i, m in enumerate(matches, start=1):
@@ -156,6 +167,16 @@ def main() -> int:
     if args.command == "build-db":
         count = build_sqlite_database(args.csv_path, args.db_path)
         print(f"Rows loaded into SQLite: {count}")
+        return 0
+
+    if args.command == "build-db-from-pdf":
+        summary = build_database_from_pdf(
+            args.pdf_path,
+            args.db_path,
+            csv_path=args.csv_path,
+            max_pages=args.max_pages,
+        )
+        print(summary)
         return 0
 
     return 1
