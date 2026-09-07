@@ -115,6 +115,23 @@ class WebApiTests(unittest.TestCase):
             self._get_json(f"{API_PREFIX}/find?category=cdu&cv=2")
         self.assertEqual(ctx.exception.code, 400)
 
+    def test_assistant_endpoint_rejects_invalid_mode(self):
+        body = json.dumps({"query": "find check valve", "mode": "bad"}).encode("utf-8")
+        req = Request(
+            f"http://127.0.0.1:{self.port}{API_PREFIX}/assistant",
+            method="POST",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertRaises(HTTPError) as ctx:
+            urlopen(req)
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_find_endpoint_rejects_invalid_limit_values(self):
+        with self.assertRaises(HTTPError) as ctx:
+            self._get_json(f"{API_PREFIX}/components?limit=0")
+        self.assertEqual(ctx.exception.code, 400)
+
     def test_index_includes_api_key_support_for_browser_requests(self):
         html = self._get_text("/")
         self.assertIn('id="api-key"', html)

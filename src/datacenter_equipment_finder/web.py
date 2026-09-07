@@ -9,7 +9,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from pydantic import ValidationError
+
 from .assistant import run_assistant_query
+from .api_models import (
+    AssistantRequest,
+    CompatibilityRequest,
+    ComponentsQuery,
+    FindQuery,
+    first_query_value,
+    query_payload,
+    validation_message,
+)
 from .service import EquipmentService
 
 API_VERSION = "v1"
@@ -161,29 +172,6 @@ def _envelope_error(code: str, message: str, details: Any = None) -> dict[str, A
         "meta": {"api_version": API_VERSION},
     }
 
-
-def _first(query: dict[str, list[str]], key: str) -> str | None:
-    values = query.get(key)
-    if not values:
-        return None
-    value = values[0].strip()
-    return value or None
-
-
-def _to_float(query: dict[str, list[str]], key: str) -> float | None:
-    value = _first(query, key)
-    if value is None:
-        return None
-    return float(value)
-
-
-def _to_int(query: dict[str, list[str]], key: str, default: int) -> int:
-    value = _first(query, key)
-    if value is None:
-        return default
-    return int(value)
-
-
 def _normalized_api_path(path: str) -> str:
     if path.startswith(API_PREFIX):
         return path
@@ -213,28 +201,6 @@ def _text_response(handler: BaseHTTPRequestHandler, text: str, status: int = 200
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
-
-
-def _validate_find_inputs(query: dict[str, list[str]]) -> tuple[bool, str | None]:
-    try:
-        category = (_first(query, "category") or "").lower()
-        top_n = _to_int(query, "top_n", 5)
-        if top_n < 1 or top_n > 100:
-            return False, "top_n must be between 1 and 100"
-        for key in ("size_mm", "connection_size_mm", "connection_size_inch", "cv", "kv", "capacity_kw", "capacity_tons"):
-            value = _to_float(query, key)
-            if value is not None and value < 0:
-                return False, f"{key} must be non-negative"
-        if _to_float(query, "cv") is not None and _to_float(query, "kv") is not None:
-            return False, "Provide either cv or kv, not both"
-        if category in {"cdu", "chiller", "filter_dryer"} and (
-            _to_float(query, "cv") is not None or _to_float(query, "kv") is not None
-        ):
-            return False, f"Cv/Kv inputs are not applicable for category '{category}'"
-    except ValueError as exc:
-        return False, f"Invalid numeric value: {exc}"
-    return True, None
-
 
 def create_handler(service: EquipmentService, config: ServerConfig | None = None):
     cfg = config or _default_config()
@@ -307,27 +273,24 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
 
             if path == f"{API_PREFIX}/components":
                 try:
-                    limit = _to_int(query, "limit", 100)
-                    offset = _to_int(query, "offset", 0)
-                    if limit < 1 or limit > 1000:
-                        raise ValueError("limit must be between 1 and 1000")
-                    if offset < 0:
-                        raise ValueError("offset must be >= 0")
+                    filters = ComponentsQuery.model_validate(
+                        query_payload(query, "category", "component_subtype", "brand", "limit", "offset")
+                    )
                     payload = service.list_components(
-                        category=_first(query, "category"),
-                        component_subtype=_first(query, "component_subtype"),
-                        brand=_first(query, "brand"),
-                        limit=limit,
-                        offset=offset,
+                        category=filters.category,
+                        component_subtype=filters.component_subtype,
+                        brand=filters.brand,
+                        limit=filters.limit,
+                        offset=filters.offset,
                     )
                     _json_response(self, _envelope_ok(payload, {"count": len(payload)}), 200)
                     return
-                except ValueError as exc:
-                    _json_response(self, _envelope_error("invalid_request", str(exc)), 400)
+                except ValidationError as exc:
+                    _json_response(self, _envelope_error("invalid_request", validation_message(exc)), 400)
                     return
 
             if path == f"{API_PREFIX}/component":
-                part = _first(query, "part_number")
+                part = first_query_value(query, "part_number")
                 if not part:
                     _json_response(self, _envelope_error("invalid_request", "part_number is required"), 400)
                     return
@@ -339,30 +302,46 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                 return
 
             if path == f"{API_PREFIX}/find":
-                ok, err = _validate_find_inputs(query)
-                if not ok:
-                    _json_response(self, _envelope_error("invalid_request", err or "invalid find inputs"), 400)
+                try:
+                    filters = FindQuery.model_validate(
+                        query_payload(
+                            query,
+                            "category",
+                            "component_subtype",
+                            "brand",
+                            "size_mm",
+                            "connection_size_mm",
+                            "connection_size_inch",
+                            "cv",
+                            "kv",
+                            "capacity_kw",
+                            "capacity_tons",
+                            "top_n",
+                        )
+                    )
+                    payload = service.find_components(
+                        category=filters.category,
+                        component_subtype=filters.component_subtype,
+                        brand=filters.brand,
+                        size_mm=filters.size_mm,
+                        connection_size_mm=filters.connection_size_mm,
+                        connection_size_inch=filters.connection_size_inch,
+                        cv=filters.cv,
+                        kv=filters.kv,
+                        capacity_kw=filters.capacity_kw,
+                        capacity_tons=filters.capacity_tons,
+                        top_n=filters.top_n,
+                    )
+                    _json_response(self, _envelope_ok(payload, {"count": len(payload)}), 200)
                     return
-                payload = service.find_components(
-                    category=_first(query, "category"),
-                    component_subtype=_first(query, "component_subtype"),
-                    brand=_first(query, "brand"),
-                    size_mm=_to_float(query, "size_mm"),
-                    connection_size_mm=_to_float(query, "connection_size_mm"),
-                    connection_size_inch=_to_float(query, "connection_size_inch"),
-                    cv=_to_float(query, "cv"),
-                    kv=_to_float(query, "kv"),
-                    capacity_kw=_to_float(query, "capacity_kw"),
-                    capacity_tons=_to_float(query, "capacity_tons"),
-                    top_n=_to_int(query, "top_n", 5),
-                )
-                _json_response(self, _envelope_ok(payload, {"count": len(payload)}), 200)
-                return
+                except ValidationError as exc:
+                    _json_response(self, _envelope_error("invalid_request", validation_message(exc)), 400)
+                    return
 
             if path == f"{API_PREFIX}/explain":
                 payload = service.explain(
-                    property_name=_first(query, "property"),
-                    category=_first(query, "category"),
+                    property_name=first_query_value(query, "property"),
+                    category=first_query_value(query, "category"),
                 )
                 _json_response(self, _envelope_ok(payload), 200)
                 return
@@ -399,18 +378,15 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
             if path == f"{API_PREFIX}/assistant":
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
-                    payload = json.loads(self.rfile.read(length) or b"{}")
-                    query = payload.get("query")
-                    if not isinstance(query, str) or not query.strip():
-                        raise ValueError("query must be a non-empty string")
-                    mode = payload.get("mode", "hybrid")
-                    if mode not in {"local", "remote", "hybrid"}:
-                        raise ValueError("mode must be one of: local, remote, hybrid")
-                    result = run_assistant_query(query, service, mode=mode)
+                    payload = AssistantRequest.model_validate(json.loads(self.rfile.read(length) or b"{}"))
+                    result = run_assistant_query(payload.query, service, mode=payload.mode)
                     _json_response(self, _envelope_ok(result), 200)
                     return
-                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                except json.JSONDecodeError as exc:
                     _json_response(self, _envelope_error("invalid_request", str(exc)), 400)
+                    return
+                except ValidationError as exc:
+                    _json_response(self, _envelope_error("invalid_request", validation_message(exc)), 400)
                     return
 
             if path != f"{API_PREFIX}/compat":
@@ -418,35 +394,19 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                payload = json.loads(self.rfile.read(length) or b"{}")
-                part_numbers = payload.get("part_numbers", [])
-                if not isinstance(part_numbers, list) or not all(isinstance(p, str) for p in part_numbers):
-                    raise ValueError("part_numbers must be a list of strings")
-                max_connection_time = payload.get("max_connection_time")
-                if max_connection_time is not None:
-                    max_connection_time = float(max_connection_time)
-                    if max_connection_time < 0:
-                        raise ValueError("max_connection_time must be non-negative")
-                required_material = payload.get("required_material")
-                if required_material is not None and not isinstance(required_material, str):
-                    raise ValueError("required_material must be a string")
-                required_connection_standard = payload.get("required_connection_standard")
-                if required_connection_standard is not None and not isinstance(required_connection_standard, str):
-                    raise ValueError("required_connection_standard must be a string")
-                required_coolant = payload.get("required_coolant")
-                if required_coolant is not None and not isinstance(required_coolant, str):
-                    raise ValueError("required_coolant must be a string")
-
+                payload = CompatibilityRequest.model_validate(json.loads(self.rfile.read(length) or b"{}"))
                 report = service.compatibility(
-                    part_numbers,
-                    max_connection_time=max_connection_time,
-                    required_material=required_material,
-                    required_connection_standard=required_connection_standard,
-                    required_coolant=required_coolant,
+                    payload.part_numbers,
+                    max_connection_time=payload.max_connection_time,
+                    required_material=payload.required_material,
+                    required_connection_standard=payload.required_connection_standard,
+                    required_coolant=payload.required_coolant,
                 )
                 _json_response(self, _envelope_ok(report), 200)
-            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            except json.JSONDecodeError as exc:
                 _json_response(self, _envelope_error("invalid_request", str(exc)), 400)
+            except ValidationError as exc:
+                _json_response(self, _envelope_error("invalid_request", validation_message(exc)), 400)
 
         def log_message(self, format: str, *args):  # noqa: A003
             return

@@ -8,6 +8,17 @@ An installable Python package is included to find data-center cooling components
 pip install -e /home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER
 ```
 
+## Development setup
+
+```bash
+uv venv
+uv sync --extra dev
+# or: pip install -e ".[dev]"
+python -m pytest
+ruff check .
+mypy
+```
+
 ## CLI examples
 
 ```bash
@@ -74,6 +85,9 @@ Hybrid AI assistant:
 - `mode=remote`: remote parser via `DCEF_AI_ENDPOINT` with local fallback
 - `mode=hybrid`: local parser + remote overlay
 - optional remote credentials: `DCEF_AI_API_KEY`
+- optional local model endpoint: set `DCEF_LOCAL_AI_ENDPOINT` and `DCEF_LOCAL_AI_MODEL`
+- local model endpoints can be Ollama-compatible, for example `DCEF_LOCAL_AI_ENDPOINT=http://127.0.0.1:11434/api/generate`
+- optional local model credential: `DCEF_LOCAL_AI_API_KEY`
 
 Python integration interface:
 
