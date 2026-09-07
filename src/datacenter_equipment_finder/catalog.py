@@ -61,7 +61,8 @@ class EquipmentCatalog:
         csv_path = Path(path) if path else cls.default_csv_path()
         with csv_path.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
-            missing = [name for name in FIELD_NAMES if name not in reader.fieldnames]
+            fieldnames = reader.fieldnames or []
+            missing = [name for name in FIELD_NAMES if name not in fieldnames]
             if missing:
                 raise ValueError(f"Missing required CSV columns: {missing}")
 

@@ -273,15 +273,15 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
 
             if path == f"{API_PREFIX}/components":
                 try:
-                    filters = ComponentsQuery.model_validate(
+                    component_filters = ComponentsQuery.model_validate(
                         query_payload(query, "category", "component_subtype", "brand", "limit", "offset")
                     )
                     payload = service.list_components(
-                        category=filters.category,
-                        component_subtype=filters.component_subtype,
-                        brand=filters.brand,
-                        limit=filters.limit,
-                        offset=filters.offset,
+                        category=component_filters.category,
+                        component_subtype=component_filters.component_subtype,
+                        brand=component_filters.brand,
+                        limit=component_filters.limit,
+                        offset=component_filters.offset,
                     )
                     _json_response(self, _envelope_ok(payload, {"count": len(payload)}), 200)
                     return
@@ -303,7 +303,7 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
 
             if path == f"{API_PREFIX}/find":
                 try:
-                    filters = FindQuery.model_validate(
+                    find_filters = FindQuery.model_validate(
                         query_payload(
                             query,
                             "category",
@@ -320,17 +320,17 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                         )
                     )
                     payload = service.find_components(
-                        category=filters.category,
-                        component_subtype=filters.component_subtype,
-                        brand=filters.brand,
-                        size_mm=filters.size_mm,
-                        connection_size_mm=filters.connection_size_mm,
-                        connection_size_inch=filters.connection_size_inch,
-                        cv=filters.cv,
-                        kv=filters.kv,
-                        capacity_kw=filters.capacity_kw,
-                        capacity_tons=filters.capacity_tons,
-                        top_n=filters.top_n,
+                        category=find_filters.category,
+                        component_subtype=find_filters.component_subtype,
+                        brand=find_filters.brand,
+                        size_mm=find_filters.size_mm,
+                        connection_size_mm=find_filters.connection_size_mm,
+                        connection_size_inch=find_filters.connection_size_inch,
+                        cv=find_filters.cv,
+                        kv=find_filters.kv,
+                        capacity_kw=find_filters.capacity_kw,
+                        capacity_tons=find_filters.capacity_tons,
+                        top_n=find_filters.top_n,
                     )
                     _json_response(self, _envelope_ok(payload, {"count": len(payload)}), 200)
                     return
@@ -339,11 +339,11 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                     return
 
             if path == f"{API_PREFIX}/explain":
-                payload = service.explain(
+                explanation = service.explain(
                     property_name=first_query_value(query, "property"),
                     category=first_query_value(query, "category"),
                 )
-                _json_response(self, _envelope_ok(payload), 200)
+                _json_response(self, _envelope_ok(explanation), 200)
                 return
 
             if path == f"{API_PREFIX}/openapi.json":
@@ -378,8 +378,8 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
             if path == f"{API_PREFIX}/assistant":
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
-                    payload = AssistantRequest.model_validate(json.loads(self.rfile.read(length) or b"{}"))
-                    result = run_assistant_query(payload.query, service, mode=payload.mode)
+                    assistant_request = AssistantRequest.model_validate(json.loads(self.rfile.read(length) or b"{}"))
+                    result = run_assistant_query(assistant_request.query, service, mode=assistant_request.mode)
                     _json_response(self, _envelope_ok(result), 200)
                     return
                 except json.JSONDecodeError as exc:
@@ -394,13 +394,13 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                payload = CompatibilityRequest.model_validate(json.loads(self.rfile.read(length) or b"{}"))
+                compat_request = CompatibilityRequest.model_validate(json.loads(self.rfile.read(length) or b"{}"))
                 report = service.compatibility(
-                    payload.part_numbers,
-                    max_connection_time=payload.max_connection_time,
-                    required_material=payload.required_material,
-                    required_connection_standard=payload.required_connection_standard,
-                    required_coolant=payload.required_coolant,
+                    compat_request.part_numbers,
+                    max_connection_time=compat_request.max_connection_time,
+                    required_material=compat_request.required_material,
+                    required_connection_standard=compat_request.required_connection_standard,
+                    required_coolant=compat_request.required_coolant,
                 )
                 _json_response(self, _envelope_ok(report), 200)
             except json.JSONDecodeError as exc:

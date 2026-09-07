@@ -269,7 +269,7 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     if category is None:
         category = _infer_category_from_subtype(service, component_subtype)
 
-    brand = _best_schema_term(t, schema["brands"], minimum_score=88.0)
+    brand = _best_schema_term(t, schema["brands"], minimum_score=78.0)
 
     size_mm = _extract_before_unit(tokens, {"mm"})
     cv = _extract_prefixed_value(tokens, "cv")
@@ -279,7 +279,7 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     connection_size_mm, connection_size_inch = _extract_connection_size(t)
     top_n = _extract_top_n(tokens, default=5)
 
-    filters = {
+    filters: dict[str, Any] = {
         "category": category,
         "component_subtype": component_subtype,
         "brand": brand,
