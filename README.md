@@ -8,6 +8,7 @@ This project provides:
 - a local web UI
 - a JSON API at `/api/v1`
 - a hybrid assistant with local / remote / hybrid modes
+- PDF-to-database ingestion with local AI-assisted extraction
 
 ## Requirements
 
@@ -125,6 +126,37 @@ dcef explain --category cdu
 dcef assist --mode local --query "find in row cdu with 2.5 inch pipe connection around 1000 kW"
 ```
 
+## Use as a package from another tool
+
+Example:
+
+```python
+from datacenter_equipment_finder import EquipmentCatalog, EquipmentService, build_database_from_pdf, extract_catalog_rows_from_pdf
+
+catalog = EquipmentCatalog.from_csv()
+service = EquipmentService(catalog)
+matches = service.find_components(category="valve", connection_size_inch=0.75, kv=6, top_n=3)
+
+rows = extract_catalog_rows_from_pdf(
+    "vendor_catalog.pdf",
+)
+
+summary = build_database_from_pdf(
+    "vendor_catalog.pdf",
+    "vendor_catalog.sqlite",
+    csv_path="vendor_catalog.csv",
+)
+```
+
+Useful package APIs:
+- `EquipmentCatalog`
+- `EquipmentService`
+- `run_assistant_query`
+- `extract_pdf_text`
+- `extract_catalog_rows_from_pdf`
+- `write_catalog_csv`
+- `build_database_from_pdf`
+
 ### Run the web UI + API
 
 ```bash
@@ -211,6 +243,43 @@ Optional auth:
 Optional remote AI settings:
 - `DCEF_AI_ENDPOINT`
 - `DCEF_AI_API_KEY`
+
+## Build a database from a PDF
+
+The package can read a PDF, ask a local AI model to map extracted content into the existing equipment schema, write a CSV, and build a SQLite database.
+
+### CLI
+
+```bash
+dcef build-db-from-pdf vendor_catalog.pdf --db-path vendor_catalog.sqlite --csv-path vendor_catalog.csv
+```
+
+Optional page limit:
+
+```bash
+dcef build-db-from-pdf vendor_catalog.pdf --db-path vendor_catalog.sqlite --max-pages 10
+```
+
+### Required local AI environment
+
+#### macOS / Linux
+
+```bash
+export DCEF_LOCAL_AI_ENDPOINT=http://127.0.0.1:11434/api/generate
+export DCEF_LOCAL_AI_MODEL=llama3.1
+```
+
+#### Windows PowerShell
+
+```powershell
+$env:DCEF_LOCAL_AI_ENDPOINT="http://127.0.0.1:11434/api/generate"
+$env:DCEF_LOCAL_AI_MODEL="llama3.1"
+```
+
+Optional:
+- `DCEF_LOCAL_AI_API_KEY`
+
+The PDF workflow is intended for vendor datasheets and catalog-like PDFs that contain structured equipment information. The local AI model is used to decide what rows should become database records in the existing schema.
 
 ## JSON API
 

@@ -12,6 +12,7 @@ authors = [{name = "RGoharimehr"}]
 license = {text = "MIT"}
 dependencies = [
   "pydantic>=2.13.5,<3",
+  "pypdf>=6.18.0,<7",
   "rapidfuzz>=3.14.6,<4",
 ]
 keywords = ["datacenter", "cooling", "cdu", "chiller", "cv", "kv"]
