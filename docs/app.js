@@ -3,6 +3,7 @@ let CATALOG = [];
 const KV_PER_CV = 0.865;
 const MM_PER_INCH = 25.4;
 const toNum = (v) => (v === "" || v == null ? null : Number(v));
+const normalizeTerm = (v) => String(v || "").toLowerCase().replace(/[_-]/g, " ");
 
 function coeffForTarget(item, cv, kv) {
   if (item.flow_coefficient_value == null || !item.flow_coefficient_type) return null;
@@ -184,7 +185,8 @@ function bindUi() {
     }
 
     const q = query.toLowerCase();
-    const pick = (arr) => arr.find((x) => q.includes(String(x).toLowerCase())) || null;
+    const normalizedQuery = normalizeTerm(q);
+    const pick = (arr) => arr.find((x) => normalizedQuery.includes(normalizeTerm(x))) || null;
     const categories = [...new Set(CATALOG.map((x) => x.category))];
     const brands = [...new Set(CATALOG.map((x) => x.brand))];
     const subtypes = [...new Set(CATALOG.map((x) => x.component_subtype).filter(Boolean))];

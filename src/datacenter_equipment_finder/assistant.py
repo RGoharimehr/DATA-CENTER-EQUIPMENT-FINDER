@@ -246,6 +246,11 @@ def run_assistant_query(
     else:
         filters = _merge_filters(local_filters, remote_filters)
         mode_used = "hybrid_remote+local" if remote_filters else "hybrid_local_only"
+    filters = dict(filters)
+    existing_checks = list(filters.get("checks", []))
+    filters["checks"] = existing_checks + [
+        check for check in _validate_local_filters(filters) if check not in existing_checks
+    ]
 
     matches = service.find_components(
         category=filters.get("category"),
