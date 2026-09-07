@@ -338,8 +338,10 @@ are enforced by `tests/test_catalog_data_quality.py`:
 2. Specifications are transcribed from that document. Values are never inferred, interpolated between models, or estimated.
 3. `part_number` uses the manufacturer's own SKU where one is published. Where a vendor publishes a product designation but no public SKU (common for CDUs), the vendor's designation is used verbatim - for example `CoolChip CDU 1350` or `Boyd 10U CDU`.
 4. Where different vendors publish different figures for the same nominal UQD size, each vendor's own published figure is recorded. The spread between them is real and is exactly what the finder is meant to surface.
-5. `estimated_price_usd` and `install_connection_time_min` are the only estimated fields. Leave them blank rather than guessing.
-6. Unit pairs must agree: `capacity_kw` / `capacity_tons` within 2%, `nominal_size_mm` / `nominal_size_inch` within 5%.
+5. `max_temperature_c` is the **product** operating limit, never the seal elastomer's material rating. Datasheets print both, and the elastomer figure is often far higher - Danfoss Hansen UQD couplings operate to 65 C while their EPDM-P seal material is rated to 150 C.
+6. Capacity ratings are condition-dependent. Where a datasheet states an approach temperature or flow condition, record it in `component_name` so two rows are not compared at different conditions.
+7. `estimated_price_usd` and `install_connection_time_min` are the only estimated fields. Leave them blank rather than guessing.
+8. Unit pairs must agree: `capacity_kw` / `capacity_tons` within 2%, `nominal_size_mm` / `nominal_size_inch` within 5%.
 
 The packaged CSV uses a unified schema for Parker/Danfoss valves, strainers, filter-dryers, CDUs, chillers, and OCP UQD quick disconnects.
 
