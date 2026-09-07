@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
@@ -26,12 +25,9 @@ def default_assistant_config() -> AssistantConfig:
     )
 
 
-def _extract_number(pattern: str, text: str) -> float | None:
-    match = re.search(pattern, text, flags=re.IGNORECASE)
-    if not match:
-        return None
+def _as_float(value: str) -> float | None:
     try:
-        return float(match.group(1))
+        return float(value)
     except ValueError:
         return None
 
@@ -45,8 +41,51 @@ def _contains_term(text: str, term: str) -> bool:
     return any(v in text for v in variants)
 
 
+def _tokenize(text: str) -> list[str]:
+    cleaned = []
+    for ch in text.lower():
+        if ch.isalnum() or ch in {"_", ".", "-"}:
+            cleaned.append(ch)
+        else:
+            cleaned.append(" ")
+    return [token for token in "".join(cleaned).split() if token]
+
+
+def _extract_before_unit(tokens: list[str], units: set[str]) -> float | None:
+    for i, tok in enumerate(tokens):
+        if tok in units and i > 0:
+            val = _as_float(tokens[i - 1])
+            if val is not None:
+                return val
+    return None
+
+
+def _extract_prefixed_value(tokens: list[str], key: str) -> float | None:
+    for i, tok in enumerate(tokens):
+        if tok == key and i + 1 < len(tokens):
+            val = _as_float(tokens[i + 1])
+            if val is not None:
+                return val
+        if tok.startswith(f"{key}=") or tok.startswith(f"{key}:"):
+            _, _, rhs = tok.partition("=" if "=" in tok else ":")
+            val = _as_float(rhs)
+            if val is not None:
+                return val
+    return None
+
+
+def _extract_top_n(tokens: list[str], default: int = 5) -> int:
+    for i, tok in enumerate(tokens):
+        if tok == "top" and i + 1 < len(tokens):
+            val = _as_float(tokens[i + 1])
+            if val is not None:
+                return int(val)
+    return default
+
+
 def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     t = text.strip().lower()
+    tokens = _tokenize(t)
     schema = service.schema()
 
     category = None
@@ -68,13 +107,12 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
             brand = b
             break
 
-    size_mm = _extract_number(r"(\d+(?:\.\d+)?)\s*mm", t)
-    cv = _extract_number(r"(?:^|\s)cv\s*[:=]?\s*(\d+(?:\.\d+)?)", t)
-    kv = _extract_number(r"(?:^|\s)kv\s*[:=]?\s*(\d+(?:\.\d+)?)", t)
-    capacity_kw = _extract_number(r"(\d+(?:\.\d+)?)\s*k\s*w", t)
-    capacity_tons = _extract_number(r"(\d+(?:\.\d+)?)\s*(?:tr|ton|tons)", t)
-    top_n_match = re.search(r"top\s*(\d+)", t)
-    top_n = int(top_n_match.group(1)) if top_n_match else 5
+    size_mm = _extract_before_unit(tokens, {"mm"})
+    cv = _extract_prefixed_value(tokens, "cv")
+    kv = _extract_prefixed_value(tokens, "kv")
+    capacity_kw = _extract_before_unit(tokens, {"kw", "kilowatt", "kilowatts"})
+    capacity_tons = _extract_before_unit(tokens, {"tr", "ton", "tons"})
+    top_n = _extract_top_n(tokens, default=5)
 
     return {
         "category": category,
