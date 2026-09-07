@@ -26,6 +26,8 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--kv", type=float, required=False)
     f.add_argument("--capacity-kw", type=float, required=False)
     f.add_argument("--capacity-tons", type=float, required=False)
+    f.add_argument("--connection-size-mm", type=float, required=False)
+    f.add_argument("--connection-size-inch", type=float, required=False)
     f.add_argument("--top-n", type=int, default=5)
 
     c = sub.add_parser("compat", help="Check compatibility for part numbers")
@@ -83,6 +85,8 @@ def main() -> int:
             target_kv=args.kv,
             target_capacity_kw=args.capacity_kw,
             target_capacity_tons=args.capacity_tons,
+            target_connection_size_mm=args.connection_size_mm,
+            target_connection_size_inch=args.connection_size_inch,
             top_n=args.top_n,
         )
         for i, m in enumerate(matches, start=1):

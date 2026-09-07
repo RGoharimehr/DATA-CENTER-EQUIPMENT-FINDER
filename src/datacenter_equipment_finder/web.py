@@ -50,6 +50,8 @@ HTML_INDEX = """<!doctype html>
     <label>Subtype <input id="subtype" placeholder="isolation_valve/check_valve"></label>
     <label>Brand <input id="brand" placeholder="Parker/Vertiv"></label>
     <label>Size (mm) <input id="size" type="number" step="any"></label>
+    <label>Connection (mm) <input id="conn-size-mm" type="number" step="any"></label>
+    <label>Connection (inch) <input id="conn-size-inch" type="number" step="any"></label>
     <label id="cv-wrap">Cv <input id="cv" type="number" step="any"></label>
     <label id="kv-wrap">Kv <input id="kv" type="number" step="any"></label>
     <label id="cap-wrap">Capacity kW <input id="capkw" type="number" step="any"></label>
@@ -99,6 +101,8 @@ HTML_INDEX = """<!doctype html>
         component_subtype: document.getElementById('subtype').value,
         brand: document.getElementById('brand').value,
         size_mm: document.getElementById('size').value,
+        connection_size_mm: document.getElementById('conn-size-mm').value,
+        connection_size_inch: document.getElementById('conn-size-inch').value,
         cv: document.getElementById('cv').value,
         kv: document.getElementById('kv').value,
         capacity_kw: document.getElementById('capkw').value,
@@ -217,7 +221,7 @@ def _validate_find_inputs(query: dict[str, list[str]]) -> tuple[bool, str | None
         top_n = _to_int(query, "top_n", 5)
         if top_n < 1 or top_n > 100:
             return False, "top_n must be between 1 and 100"
-        for key in ("size_mm", "cv", "kv", "capacity_kw", "capacity_tons"):
+        for key in ("size_mm", "connection_size_mm", "connection_size_inch", "cv", "kv", "capacity_kw", "capacity_tons"):
             value = _to_float(query, key)
             if value is not None and value < 0:
                 return False, f"{key} must be non-negative"
@@ -344,6 +348,8 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                     component_subtype=_first(query, "component_subtype"),
                     brand=_first(query, "brand"),
                     size_mm=_to_float(query, "size_mm"),
+                    connection_size_mm=_to_float(query, "connection_size_mm"),
+                    connection_size_inch=_to_float(query, "connection_size_inch"),
                     cv=_to_float(query, "cv"),
                     kv=_to_float(query, "kv"),
                     capacity_kw=_to_float(query, "capacity_kw"),

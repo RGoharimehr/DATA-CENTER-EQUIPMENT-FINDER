@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from .service import EquipmentService
+from .units import inch_to_mm
 
 
 @dataclass(frozen=True)
@@ -83,6 +85,54 @@ def _extract_top_n(tokens: list[str], default: int = 5) -> int:
     return default
 
 
+def _extract_connection_size(text: str) -> tuple[float | None, float | None]:
+    patterns = (
+        r"(?:pipe|piping|connection|port|line|diameter|dn)\s*(?:size)?\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(mm|millimeter|millimeters|in|inch|inches|\")",
+        r"(\d+(?:\.\d+)?)\s*(mm|millimeter|millimeters|in|inch|inches|\")\s*(?:pipe|piping|connection|port|line|diameter|id|od|dn)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        value = _as_float(match.group(1))
+        if value is None:
+            continue
+        unit = match.group(2)
+        if unit.startswith("mm"):
+            return value, None
+        return inch_to_mm(value), value
+    return None, None
+
+
+def _infer_category_from_subtype(service: EquipmentService, component_subtype: str | None) -> str | None:
+    if not component_subtype:
+        return None
+    for category, subtypes in service.schema()["subtypes_by_category"].items():
+        if component_subtype in subtypes:
+            return category
+    return None
+
+
+def _validate_local_filters(filters: dict[str, Any]) -> list[str]:
+    checks: list[str] = []
+    if filters.get("cv") is not None and filters.get("kv") is not None:
+        filters["kv"] = None
+        checks.append("Both cv and kv were provided; the local model kept cv and dropped kv.")
+    if filters.get("category") in {"cdu", "chiller", "filter_dryer"} and (
+        filters.get("cv") is not None or filters.get("kv") is not None
+    ):
+        filters["cv"] = None
+        filters["kv"] = None
+        checks.append("Cv/Kv inputs were ignored because they do not apply to CDU, chiller, or filter_dryer searches.")
+    if filters.get("connection_size_inch") is not None and filters.get("connection_size_mm") is None:
+        filters["connection_size_mm"] = inch_to_mm(filters["connection_size_inch"])
+        checks.append("Converted connection size from inches to millimeters for local matching.")
+    if filters.get("size_mm") is None and filters.get("connection_size_mm") is not None:
+        filters["size_mm"] = filters["connection_size_mm"]
+        checks.append("Used the connection size as the nominal size target because no explicit size_mm was provided.")
+    return checks
+
+
 def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     t = text.strip().lower()
     tokens = _tokenize(t)
@@ -100,6 +150,16 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
             if _contains_term(t, s):
                 component_subtype = s
                 break
+    if component_subtype is None:
+        for subtypes in schema["subtypes_by_category"].values():
+            for s in subtypes:
+                if _contains_term(t, s):
+                    component_subtype = s
+                    break
+            if component_subtype is not None:
+                break
+    if category is None:
+        category = _infer_category_from_subtype(service, component_subtype)
 
     brand = None
     for b in schema["brands"]:
@@ -112,9 +172,10 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     kv = _extract_prefixed_value(tokens, "kv")
     capacity_kw = _extract_before_unit(tokens, {"kw", "kilowatt", "kilowatts"})
     capacity_tons = _extract_before_unit(tokens, {"tr", "ton", "tons"})
+    connection_size_mm, connection_size_inch = _extract_connection_size(t)
     top_n = _extract_top_n(tokens, default=5)
 
-    return {
+    filters = {
         "category": category,
         "component_subtype": component_subtype,
         "brand": brand,
@@ -123,8 +184,12 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
         "kv": kv,
         "capacity_kw": capacity_kw,
         "capacity_tons": capacity_tons,
+        "connection_size_mm": connection_size_mm,
+        "connection_size_inch": connection_size_inch,
         "top_n": max(1, min(top_n, 20)),
     }
+    filters["checks"] = _validate_local_filters(filters)
+    return filters
 
 
 def remote_parse_query(text: str, config: AssistantConfig) -> dict[str, Any] | None:
@@ -191,6 +256,8 @@ def run_assistant_query(
         kv=filters.get("kv"),
         capacity_kw=filters.get("capacity_kw"),
         capacity_tons=filters.get("capacity_tons"),
+        connection_size_mm=filters.get("connection_size_mm"),
+        connection_size_inch=filters.get("connection_size_inch"),
         top_n=int(filters.get("top_n") or 5),
     )
 
@@ -198,5 +265,6 @@ def run_assistant_query(
         "mode_requested": normalized_mode,
         "mode_used": mode_used,
         "filters": filters,
+        "checks": filters.get("checks", []),
         "matches": matches,
     }

@@ -13,12 +13,14 @@ pip install -e /home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPM
 ```bash
 dcef find --category valve --size-mm 20 --cv 7 --top-n 3
 dcef find --category valve --component-subtype check_valve --size-mm 20 --kv 6 --top-n 3
+dcef find --category valve --component-subtype check_valve --connection-size-inch 0.75 --kv 6 --top-n 3
 dcef find --category cdu --capacity-kw 500 --size-mm 50
+dcef find --category cdu --component-subtype in_row_cdu --connection-size-inch 2.5 --capacity-kw 1000 --top-n 3
 dcef compat LLD-20 DML-20 --max-connection-time 40 --required-material Copper
 dcef compat LXDU-450 JCI-CDU-1050 --required-connection-standard "ANSI B16.5" --required-coolant Water
 dcef explain --property flow_coefficient_value
 dcef explain --category cdu
-dcef assist --mode hybrid --query "find Johnson Controls CDU around 1000 kW, 80 mm"
+dcef assist --mode local --query "find in row cdu with 2.5 inch pipe connection around 1000 kW"
 dcef serve --host 127.0.0.1 --port 8000 --api-key devkey --rate-limit-per-minute 120
 dcef build-catalog
 dcef sync-catalogs --limit 5
@@ -40,7 +42,7 @@ The web server provides machine-friendly endpoints:
 - `GET /api/v1/components?category=...&brand=...&limit=...&offset=...`
 - `GET /api/v1/components?category=...&component_subtype=...&brand=...&limit=...&offset=...`
 - `GET /api/v1/component?part_number=...`
-- `GET /api/v1/find?category=...&component_subtype=...&size_mm=...&cv=...&kv=...&capacity_kw=...&top_n=...`
+- `GET /api/v1/find?category=...&component_subtype=...&size_mm=...&connection_size_mm=...&connection_size_inch=...&cv=...&kv=...&capacity_kw=...&top_n=...`
 - `POST /api/v1/compat` with JSON body:
   - `{"part_numbers":["LLD-20","DML-20"],"max_connection_time":40,"required_material":"Copper","required_connection_standard":"ANSI B16.5","required_coolant":"Water"}`
 - `GET /api/v1/explain?property=flow_coefficient_value` or `GET /api/v1/explain?category=cdu`
@@ -51,8 +53,9 @@ The web server provides machine-friendly endpoints:
 
 Component-aware input behavior:
 
-- `valve`/`strainer`: use `cv`/`kv` and size
-- `filter_dryer`/`cdu`/`chiller`: use capacity and size; Cv/Kv is rejected
+- `valve`/`strainer`: use `cv`/`kv`, nominal size, and optional connection size
+- `filter_dryer`/`cdu`/`chiller`: use capacity, subtype, nominal size, and optional connection size; Cv/Kv is rejected
+- local assistant queries can infer connection size from phrases like `2 inch pipe`, `connection 50 mm`, or `in row cdu`
 - compatibility checks now include thermal fields (`required_connection_standard`, `required_coolant`) and hydraulic connection-time checks
 
 Optional API key auth:

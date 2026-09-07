@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .models import EquipmentComponent, MatchResult
-from .units import kv_to_cv, cv_to_kv, tons_to_kw
+from .units import cv_to_kv, inch_to_mm, kv_to_cv, tons_to_kw
 
 FLOW_COEFFICIENT_CATEGORIES = {"valve", "strainer"}
 
@@ -33,6 +33,14 @@ def _coefficient_for_target(
     return None
 
 
+def _connection_size_mm(component: EquipmentComponent) -> Optional[float]:
+    if component.nominal_size_mm is not None:
+        return component.nominal_size_mm
+    if component.nominal_size_inch is not None:
+        return inch_to_mm(component.nominal_size_inch)
+    return None
+
+
 def find_closest_components(
     components: Iterable[EquipmentComponent],
     *,
@@ -44,6 +52,8 @@ def find_closest_components(
     target_kv: Optional[float] = None,
     target_capacity_kw: Optional[float] = None,
     target_capacity_tons: Optional[float] = None,
+    target_connection_size_mm: Optional[float] = None,
+    target_connection_size_inch: Optional[float] = None,
     top_n: int = 5,
 ) -> list[MatchResult]:
     filtered = []
@@ -58,11 +68,15 @@ def find_closest_components(
 
     if target_capacity_tons is not None and target_capacity_kw is None:
         target_capacity_kw = tons_to_kw(target_capacity_tons)
+    if target_connection_size_inch is not None and target_connection_size_mm is None:
+        target_connection_size_mm = inch_to_mm(target_connection_size_inch)
 
     scored: list[MatchResult] = []
     for c in filtered:
         score = 0.0
         score += _normalized_delta(c.nominal_size_mm, target_size_mm, fallback=0.2)
+        if target_connection_size_mm is not None:
+            score += 1.2 * _normalized_delta(_connection_size_mm(c), target_connection_size_mm, fallback=0.35)
 
         target_coeff = target_cv if target_cv is not None else target_kv
         if target_coeff is not None and c.category.lower() in FLOW_COEFFICIENT_CATEGORIES:

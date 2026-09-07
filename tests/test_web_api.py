@@ -45,6 +45,13 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"][0]["component"]["part_number"], "S4A-20")
 
+    def test_find_endpoint_accepts_connection_size(self):
+        payload = self._get_json(
+            f"{API_PREFIX}/find?category=cdu&component_subtype=in_row_cdu&connection_size_inch=2.5&capacity_kw=1000&top_n=1"
+        )
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"][0]["component"]["part_number"], "CHX2000")
+
     def test_compat_endpoint(self):
         body = json.dumps(
             {
@@ -77,6 +84,22 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["data"]["matches"])
 
+    def test_assistant_endpoint_extracts_connection_size(self):
+        body = json.dumps(
+            {"query": "find in row cdu with 2.5 inch pipe connection around 1000 kw", "mode": "local"}
+        ).encode("utf-8")
+        req = Request(
+            f"http://127.0.0.1:{self.port}{API_PREFIX}/assistant",
+            method="POST",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(payload["ok"])
+        self.assertAlmostEqual(payload["data"]["filters"]["connection_size_inch"], 2.5)
+        self.assertEqual(payload["data"]["matches"][0]["component"]["part_number"], "CHX2000")
+
     def test_legacy_route_still_works(self):
         payload = self._get_json("/api/find?category=valve&component_subtype=shutoff_valve&size_mm=20&cv=7&top_n=1")
         self.assertTrue(payload["ok"])
@@ -95,6 +118,8 @@ class WebApiTests(unittest.TestCase):
     def test_index_includes_api_key_support_for_browser_requests(self):
         html = self._get_text("/")
         self.assertIn('id="api-key"', html)
+        self.assertIn('id="conn-size-mm"', html)
+        self.assertIn('id="conn-size-inch"', html)
         self.assertIn("'X-API-Key': apiKey", html)
         self.assertIn("localStorage.getItem('dcef-api-key')", html)
 

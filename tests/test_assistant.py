@@ -28,6 +28,29 @@ class AssistantTests(unittest.TestCase):
         self.assertIn(result["mode_used"], {"hybrid_local_only", "hybrid_remote+local"})
         self.assertTrue(result["matches"])
 
+    def test_local_parse_extracts_connection_size_and_cdu_subtype(self):
+        parsed = local_parse_query(
+            "find in row cdu with 2.5 inch pipe connection around 1000 kw top 2",
+            self.service,
+        )
+        self.assertEqual(parsed["category"], "cdu")
+        self.assertEqual(parsed["component_subtype"], "in_row_cdu")
+        self.assertAlmostEqual(parsed["connection_size_inch"], 2.5)
+        self.assertAlmostEqual(parsed["connection_size_mm"], 63.5)
+        self.assertAlmostEqual(parsed["size_mm"], 63.5)
+        self.assertEqual(parsed["top_n"], 2)
+
+    def test_local_assistant_checks_drop_invalid_cdu_kv(self):
+        result = run_assistant_query(
+            "find in rack cdu with 1.25 inch pipe kv 6 around 250 kw",
+            self.service,
+            mode="local",
+        )
+        self.assertEqual(result["filters"]["component_subtype"], "in_rack_cdu")
+        self.assertIsNone(result["filters"]["kv"])
+        self.assertTrue(any("Cv/Kv inputs were ignored" in check for check in result["checks"]))
+        self.assertEqual(result["matches"][0]["component"]["part_number"], "SMC-CDU-250")
+
 
 if __name__ == "__main__":
     unittest.main()

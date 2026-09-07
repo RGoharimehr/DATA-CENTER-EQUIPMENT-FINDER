@@ -43,6 +43,28 @@ class PackageTests(unittest.TestCase):
         )
         self.assertTrue(all((m.component.component_subtype or "") == "check_valve" for m in result))
 
+    def test_find_uses_connection_size_for_valve_matching(self):
+        result = find_closest_components(
+            self.catalog.components,
+            category="valve",
+            component_subtype="check_valve",
+            target_connection_size_inch=0.75,
+            target_kv=6.0,
+            top_n=1,
+        )[0]
+        self.assertEqual(result.component.part_number, "SCA-X-20")
+
+    def test_find_uses_connection_size_for_cdu_matching(self):
+        result = find_closest_components(
+            self.catalog.components,
+            category="cdu",
+            component_subtype="in_row_cdu",
+            target_connection_size_inch=2.5,
+            target_capacity_kw=1000,
+            top_n=1,
+        )[0]
+        self.assertEqual(result.component.part_number, "CHX2000")
+
     def test_compatibility_detects_connection_time_limit(self):
         parts = [
             c for c in self.catalog.components if c.part_number in {"LLD-20", "DML-20"}
