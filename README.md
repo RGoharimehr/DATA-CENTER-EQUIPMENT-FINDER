@@ -16,7 +16,27 @@ dcef find --category cdu --capacity-kw 500 --size-mm 50
 dcef compat LLD-20 DML-20 --max-connection-time 40 --required-material Copper
 dcef explain --property flow_coefficient_value
 dcef explain --category cdu
+dcef serve --host 127.0.0.1 --port 8000
 ```
+
+Then open `http://127.0.0.1:8000`.
+
+## JSON data interface (for other code/libraries)
+
+The web server provides machine-friendly endpoints:
+
+- `GET /api/schema` → available fields, categories, brands
+- `GET /api/components?category=...&brand=...&limit=...&offset=...`
+- `GET /api/component?part_number=...`
+- `GET /api/find?category=...&size_mm=...&cv=...&kv=...&capacity_kw=...&top_n=...`
+- `POST /api/compat` with JSON body:
+  - `{"part_numbers":["LLD-20","DML-20"],"max_connection_time":40,"required_material":"Copper"}`
+- `GET /api/explain?property=flow_coefficient_value` or `GET /api/explain?category=cdu`
+- `GET /api/health`
+
+Python integration interface:
+
+- `datacenter_equipment_finder.EquipmentService`
 
 ## Data files
 

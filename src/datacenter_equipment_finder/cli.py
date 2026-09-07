@@ -6,6 +6,7 @@ from .catalog import EquipmentCatalog
 from .compatibility import check_compatibility
 from .explanations import explain_category, explain_property
 from .matching import find_closest_components
+from .web import run_server
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -30,6 +31,10 @@ def _build_parser() -> argparse.ArgumentParser:
     e = sub.add_parser("explain", help="Explain a property or category")
     e.add_argument("--property", dest="property_name")
     e.add_argument("--category")
+
+    s = sub.add_parser("serve", help="Run web interface and JSON API")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8000)
 
     return parser
 
@@ -81,6 +86,10 @@ def main() -> int:
             print(explain_category(args.category))
         else:
             parser.error("Provide --property or --category")
+        return 0
+
+    if args.command == "serve":
+        run_server(host=args.host, port=args.port)
         return 0
 
     return 1
