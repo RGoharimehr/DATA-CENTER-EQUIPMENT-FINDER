@@ -8,6 +8,7 @@ PROPERTY_EXPLANATIONS = {
     "pressure_rating_bar": "Maximum working pressure rating bounds safe operation and must exceed system design pressure with engineering margin.",
     "install_connection_time_min": "Estimated connection time captures installation complexity and affects deployment window and service downtime planning.",
     "max_temperature_c": "Maximum fluid temperature bounds the coolant operating envelope; elastomer seals such as EPDM usually set this limit, not the metal body.",
+    "verification_status": "\"verified\" means every figure in the row was read from the cited vendor document. \"unverified\" means the row has not been checked against a source and should be confirmed before it is used for selection.",
     "estimated_price_usd": "Estimated price is optional market guidance; many industrial components require quote-based pricing rather than public list prices.",
 }
 

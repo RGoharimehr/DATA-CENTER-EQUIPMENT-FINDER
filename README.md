@@ -329,12 +329,37 @@ Example assistant request body:
 - `src/datacenter_equipment_finder/data/equipment_catalog.csv`
 - `src/datacenter_equipment_finder/data/equipment_catalog.sqlite`
 
+### Verification status
+
+Every row carries a `verification_status`:
+
+- `verified` - each figure was read from the document in `datasheet_url`.
+- `unverified` - the row has not been checked against a source. Confirm before relying on it.
+
+Filter to trustworthy rows only:
+
+```bash
+dcef find --category cdu --capacity-kw 1000 | grep -v unverified
+curl "http://127.0.0.1:8000/api/v1/components?category=cdu" | grep verification_status
+```
+
+Checking the inherited rows found three that could not be substantiated, which is why
+this field exists:
+
+| Row as it was | What the vendor document says |
+| --- | --- |
+| `SMC-CDU-250` | No such SKU. Supermicro publishes `LCS-SCDU-250L4001` (EIA) and `LCS-SCDU-250LP4002` (OCP). |
+| `CHX2000`, 1000 kW, 65 mm Victaulic | CHx2000 is rated 2000 kW with 4 in tri-clamp connections. |
+| `NC-CDU-300`, 300 kW | No such model. Accelsius ships NeuCool MR250 (250 kW) and IR150. |
+| `DCS-1600` | Not an Airedale designation. TurboChill DCS models are TCF13R18K, TCF24R24G, TCC14R28K. |
+| `LXDU-450`, 450 kW, NPT | Vertiv XDU450, 453 kW at 4 C approach, 2.5 in hygienic flange. |
+
 ### Data provenance rules
 
 Every catalog row must be traceable to a published vendor document. These rules
 are enforced by `tests/test_catalog_data_quality.py`:
 
-1. `source_catalog` and `datasheet_url` are required on every row, and the URL must be a real published document.
+1. `source_catalog` and `datasheet_url` are required on every row, and the URL must be a real published document. A row marked `verified` must cite a specific document, not a vendor landing page.
 2. Specifications are transcribed from that document. Values are never inferred, interpolated between models, or estimated.
 3. `part_number` uses the manufacturer's own SKU where one is published. Where a vendor publishes a product designation but no public SKU (common for CDUs), the vendor's designation is used verbatim - for example `CoolChip CDU 1350` or `Boyd 10U CDU`.
 4. Where different vendors publish different figures for the same nominal UQD size, each vendor's own published figure is recorded. The spread between them is real and is exactly what the finder is meant to surface.

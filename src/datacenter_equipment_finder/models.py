@@ -30,6 +30,9 @@ class EquipmentComponent:
     source_page: Optional[str]
     datasheet_url: Optional[str]
     baseline_references: Optional[str]
+    # "verified" means each figure was read from the cited document. "unverified"
+    # means the row predates that check and its figures have not been confirmed.
+    verification_status: str = "unverified"
 
 
 @dataclass(frozen=True)

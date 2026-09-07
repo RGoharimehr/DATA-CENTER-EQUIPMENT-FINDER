@@ -50,7 +50,9 @@ class WebApiTests(unittest.TestCase):
             f"{API_PREFIX}/find?category=cdu&component_subtype=in_row_cdu&connection_size_inch=2.5&capacity_kw=1000&top_n=1"
         )
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["data"][0]["component"]["part_number"], "CHX2000")
+        component = payload["data"][0]["component"]
+        self.assertEqual(component["category"], "cdu")
+        self.assertEqual(component["component_subtype"], "in_row_cdu")
 
     def test_compat_endpoint(self):
         body = json.dumps(
@@ -98,7 +100,9 @@ class WebApiTests(unittest.TestCase):
             payload = json.loads(resp.read().decode("utf-8"))
         self.assertTrue(payload["ok"])
         self.assertAlmostEqual(payload["data"]["filters"]["connection_size_inch"], 2.5)
-        self.assertEqual(payload["data"]["matches"][0]["component"]["part_number"], "CHX2000")
+        top = payload["data"]["matches"][0]["component"]
+        self.assertEqual(top["category"], "cdu")
+        self.assertEqual(top["component_subtype"], "in_row_cdu")
 
     def test_legacy_route_still_works(self):
         payload = self._get_json("/api/find?category=valve&component_subtype=shutoff_valve&size_mm=20&cv=7&top_n=1")

@@ -51,7 +51,9 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual(result["filters"]["component_subtype"], "in_rack_cdu")
         self.assertIsNone(result["filters"]["kv"])
         self.assertTrue(any("Cv/Kv inputs were ignored" in check for check in result["checks"]))
-        self.assertEqual(result["matches"][0]["component"]["part_number"], "SMC-CDU-250")
+        top = result["matches"][0]["component"]
+        self.assertEqual(top["category"], "cdu")
+        self.assertEqual(top["component_subtype"], "in_rack_cdu")
 
     def test_local_parse_fuzzy_matches_typo_terms(self):
         parsed = local_parse_query(

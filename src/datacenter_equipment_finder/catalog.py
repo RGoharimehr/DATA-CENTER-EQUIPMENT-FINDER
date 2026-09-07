@@ -33,6 +33,7 @@ FIELD_NAMES = [
     "source_page",
     "datasheet_url",
     "baseline_references",
+    "verification_status",
 ]
 
 
@@ -94,6 +95,7 @@ class EquipmentCatalog:
                         source_page=_to_str(row["source_page"]),
                         datasheet_url=_to_str(row["datasheet_url"]),
                         baseline_references=_to_str(row["baseline_references"]),
+                        verification_status=_to_str(row.get("verification_status", "")) or "unverified",
                     )
                 )
         return cls(components)
