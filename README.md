@@ -59,6 +59,7 @@ Optional API key auth:
 
 - set `DCEF_API_KEY` env var or pass `--api-key` in `dcef serve`
 - send `X-API-Key: <key>` header on API calls
+- in the built-in web UI, enter the key in the `API Key` field to reuse it for browser requests
 
 Rate limiting:
 
