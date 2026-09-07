@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datacenter-equipment-finder"
+version = "0.1.0"
+description = "Find closest data-center cooling components by required size/capacity and compatibility."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "RGoharimehr"}]
+license = {text = "MIT"}
+keywords = ["datacenter", "cooling", "cdu", "chiller", "cv", "kv"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+
+[project.scripts]
+dcef = "datacenter_equipment_finder.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+datacenter_equipment_finder = ["data/*.csv", "data/*.sqlite", "data/vendors/*.csv", "data/catalog_downloads/*"]
