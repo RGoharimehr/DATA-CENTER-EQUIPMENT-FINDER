@@ -34,6 +34,9 @@ HTML_INDEX = """<!doctype html>
   <h1>Data Center Equipment Finder</h1>
   <p>API version: <code>v1</code></p>
   <div class="row">
+    <label>API Key <input id="api-key" type="password" placeholder="Optional X-API-Key"></label>
+  </div>
+  <div class="row">
     <label>Category
       <select id="category" onchange="onCategoryChange()">
         <option value="">(any)</option>
@@ -69,6 +72,15 @@ HTML_INDEX = """<!doctype html>
   </div>
   <pre id="ai-out">Run an AI request.</pre>
   <script>
+    function apiHeaders(extra = {}) {
+      const apiKey = document.getElementById('api-key').value.trim();
+      if (apiKey) {
+        localStorage.setItem('dcef-api-key', apiKey);
+        return {...extra, 'X-API-Key': apiKey};
+      }
+      localStorage.removeItem('dcef-api-key');
+      return extra;
+    }
     function onCategoryChange() {
       const cat = document.getElementById('category').value;
       const showFlow = (cat === 'valve' || cat === 'strainer' || cat === '');
@@ -92,14 +104,16 @@ HTML_INDEX = """<!doctype html>
         capacity_kw: document.getElementById('capkw').value,
         top_n: document.getElementById('topn').value
       });
-      const res = await fetch('/api/v1/find?' + params.toString());
+      const res = await fetch('/api/v1/find?' + params.toString(), {
+        headers: apiHeaders()
+      });
       const data = await res.json();
       document.getElementById('out').textContent = JSON.stringify(data, null, 2);
     }
     async function runAssistant() {
       const res = await fetch('/api/v1/assistant', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: apiHeaders({'Content-Type': 'application/json'}),
         body: JSON.stringify({
           query: document.getElementById('ai-query').value,
           mode: document.getElementById('ai-mode').value
@@ -108,6 +122,7 @@ HTML_INDEX = """<!doctype html>
       const data = await res.json();
       document.getElementById('ai-out').textContent = JSON.stringify(data, null, 2);
     }
+    document.getElementById('api-key').value = localStorage.getItem('dcef-api-key') || '';
     onCategoryChange();
   </script>
 </body>

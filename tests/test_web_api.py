@@ -29,6 +29,10 @@ class WebApiTests(unittest.TestCase):
         with urlopen(f"http://127.0.0.1:{self.port}{path}") as resp:
             return json.loads(resp.read().decode("utf-8"))
 
+    def _get_text(self, path: str) -> str:
+        with urlopen(f"http://127.0.0.1:{self.port}{path}") as resp:
+            return resp.read().decode("utf-8")
+
     def test_schema_endpoint(self):
         payload = self._get_json(f"{API_PREFIX}/schema")
         self.assertTrue(payload["ok"])
@@ -87,6 +91,12 @@ class WebApiTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as ctx:
             self._get_json(f"{API_PREFIX}/find?category=cdu&cv=2")
         self.assertEqual(ctx.exception.code, 400)
+
+    def test_index_includes_api_key_support_for_browser_requests(self):
+        html = self._get_text("/")
+        self.assertIn('id="api-key"', html)
+        self.assertIn("'X-API-Key': apiKey", html)
+        self.assertIn("localStorage.getItem('dcef-api-key')", html)
 
 
 class WebApiAuthAndRateLimitTests(unittest.TestCase):
