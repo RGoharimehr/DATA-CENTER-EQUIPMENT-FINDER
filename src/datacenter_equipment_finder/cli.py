@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 
+from .assistant import run_assistant_query
 from .catalog import EquipmentCatalog
+from .catalog_tools import build_sqlite_database, download_catalogs
 from .compatibility import check_compatibility
 from .dataset_pipeline import build_catalog_from_vendor_sources
 from .explanations import explain_category, explain_property
 from .matching import find_closest_components
+from .service import EquipmentService
 from .web import run_server
 
 
@@ -36,6 +39,10 @@ def _build_parser() -> argparse.ArgumentParser:
     e.add_argument("--property", dest="property_name")
     e.add_argument("--category")
 
+    a = sub.add_parser("assist", help="Hybrid AI request parser and matcher")
+    a.add_argument("--query", required=True)
+    a.add_argument("--mode", default="hybrid", choices=["local", "remote", "hybrid"])
+
     s = sub.add_parser("serve", help="Run web interface and JSON API")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
@@ -45,6 +52,15 @@ def _build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("build-catalog", help="Build packaged catalog from vendor CSV sources")
     b.add_argument("--source-dir", default="src/datacenter_equipment_finder/data/vendors")
     b.add_argument("--output-file", default="src/datacenter_equipment_finder/data/equipment_catalog.csv")
+
+    sc = sub.add_parser("sync-catalogs", help="Download catalog/datasheet files from catalog URLs")
+    sc.add_argument("--csv-path", default="src/datacenter_equipment_finder/data/equipment_catalog.csv")
+    sc.add_argument("--output-dir", default="src/datacenter_equipment_finder/data/catalog_downloads")
+    sc.add_argument("--limit", type=int, default=None)
+
+    db = sub.add_parser("build-db", help="Build SQLite database from catalog CSV")
+    db.add_argument("--csv-path", default="src/datacenter_equipment_finder/data/equipment_catalog.csv")
+    db.add_argument("--db-path", default="src/datacenter_equipment_finder/data/equipment_catalog.sqlite")
 
     return parser
 
@@ -104,6 +120,15 @@ def main() -> int:
             parser.error("Provide --property or --category")
         return 0
 
+    if args.command == "assist":
+        output = run_assistant_query(
+            args.query,
+            EquipmentService.default(),
+            mode=args.mode,
+        )
+        print(output)
+        return 0
+
     if args.command == "serve":
         run_server(
             host=args.host,
@@ -121,6 +146,16 @@ def main() -> int:
                 print(f"- {err}")
             return 2
         print(f"Catalog built: {args.output_file}")
+        return 0
+
+    if args.command == "sync-catalogs":
+        summary = download_catalogs(args.csv_path, args.output_dir, limit=args.limit)
+        print(summary)
+        return 0
+
+    if args.command == "build-db":
+        count = build_sqlite_database(args.csv_path, args.db_path)
+        print(f"Rows loaded into SQLite: {count}")
         return 0
 
     return 1

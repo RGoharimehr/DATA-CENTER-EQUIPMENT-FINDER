@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .assistant import run_assistant_query
 from .service import EquipmentService
 
 API_VERSION = "v1"
@@ -54,6 +55,19 @@ HTML_INDEX = """<!doctype html>
   </div>
   <h3>Results</h3>
   <pre id="out">Run a search.</pre>
+  <h3>Hybrid AI assistant</h3>
+  <div class="row">
+    <label>Mode
+      <select id="ai-mode">
+        <option value="hybrid">hybrid</option>
+        <option value="local">local</option>
+        <option value="remote">remote</option>
+      </select>
+    </label>
+    <input id="ai-query" style="min-width: 420px;" placeholder="e.g. find check valve 20 mm kv 6 for ammonia from danfoss" />
+    <button onclick="runAssistant()">Ask AI</button>
+  </div>
+  <pre id="ai-out">Run an AI request.</pre>
   <script>
     function onCategoryChange() {
       const cat = document.getElementById('category').value;
@@ -81,6 +95,18 @@ HTML_INDEX = """<!doctype html>
       const res = await fetch('/api/v1/find?' + params.toString());
       const data = await res.json();
       document.getElementById('out').textContent = JSON.stringify(data, null, 2);
+    }
+    async function runAssistant() {
+      const res = await fetch('/api/v1/assistant', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          query: document.getElementById('ai-query').value,
+          mode: document.getElementById('ai-mode').value
+        })
+      });
+      const data = await res.json();
+      document.getElementById('ai-out').textContent = JSON.stringify(data, null, 2);
     }
     onCategoryChange();
   </script>
@@ -331,6 +357,7 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                         f"{API_PREFIX}/component": {"get": {}},
                         f"{API_PREFIX}/find": {"get": {}},
                         f"{API_PREFIX}/compat": {"post": {}},
+                        f"{API_PREFIX}/assistant": {"post": {}},
                         f"{API_PREFIX}/explain": {"get": {}},
                     },
                 }
@@ -347,6 +374,23 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                 return
             if path.startswith(API_PREFIX) and not self._check_rate_limit():
                 return
+
+            if path == f"{API_PREFIX}/assistant":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    query = payload.get("query")
+                    if not isinstance(query, str) or not query.strip():
+                        raise ValueError("query must be a non-empty string")
+                    mode = payload.get("mode", "hybrid")
+                    if mode not in {"local", "remote", "hybrid"}:
+                        raise ValueError("mode must be one of: local, remote, hybrid")
+                    result = run_assistant_query(query, service, mode=mode)
+                    _json_response(self, _envelope_ok(result), 200)
+                    return
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    _json_response(self, _envelope_error("invalid_request", str(exc)), 400)
+                    return
 
             if path != f"{API_PREFIX}/compat":
                 _json_response(self, _envelope_error("not_found", "not found"), 404)

@@ -53,6 +53,20 @@
     <pre id="compatOut">Waiting for request...</pre>
   </div>
 
+  <div class="card">
+    <h3>Hybrid AI assistant</h3>
+    <div class="row">
+      <select id="aiMode">
+        <option value="hybrid">hybrid</option>
+        <option value="local">local</option>
+      </select>
+      <input id="apiBase" placeholder="API base (optional), e.g. http://127.0.0.1:8000" style="min-width: 320px;" />
+      <input id="aiQuery" placeholder="find check valve 20 mm kv 6 from Danfoss" style="min-width: 360px;" />
+      <button id="assist">Ask AI</button>
+    </div>
+    <pre id="aiOut">Waiting for request...</pre>
+  </div>
+
   <script src="./app.js"></script>
 </body>
 </html>

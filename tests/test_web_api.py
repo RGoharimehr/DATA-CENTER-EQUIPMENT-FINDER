@@ -60,6 +60,19 @@ class WebApiTests(unittest.TestCase):
         self.assertFalse(payload["data"]["is_compatible"])
         self.assertGreaterEqual(payload["data"]["selected_count"], 2)
 
+    def test_assistant_endpoint(self):
+        body = json.dumps({"query": "find check_valve 20 mm kv 6 from danfoss", "mode": "hybrid"}).encode("utf-8")
+        req = Request(
+            f"http://127.0.0.1:{self.port}{API_PREFIX}/assistant",
+            method="POST",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["data"]["matches"])
+
     def test_legacy_route_still_works(self):
         payload = self._get_json("/api/find?category=valve&component_subtype=shutoff_valve&size_mm=20&cv=7&top_n=1")
         self.assertTrue(payload["ok"])

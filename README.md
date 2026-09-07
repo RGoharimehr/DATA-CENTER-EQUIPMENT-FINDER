@@ -18,8 +18,11 @@ dcef compat LLD-20 DML-20 --max-connection-time 40 --required-material Copper
 dcef compat LXDU-450 JCI-CDU-1050 --required-connection-standard "ANSI B16.5" --required-coolant Water
 dcef explain --property flow_coefficient_value
 dcef explain --category cdu
+dcef assist --mode hybrid --query "find Johnson Controls CDU around 1000 kW, 80 mm"
 dcef serve --host 127.0.0.1 --port 8000 --api-key devkey --rate-limit-per-minute 120
 dcef build-catalog
+dcef sync-catalogs --limit 5
+dcef build-db
 ```
 
 Then open `http://127.0.0.1:8000`.
@@ -41,6 +44,8 @@ The web server provides machine-friendly endpoints:
 - `POST /api/v1/compat` with JSON body:
   - `{"part_numbers":["LLD-20","DML-20"],"max_connection_time":40,"required_material":"Copper","required_connection_standard":"ANSI B16.5","required_coolant":"Water"}`
 - `GET /api/v1/explain?property=flow_coefficient_value` or `GET /api/v1/explain?category=cdu`
+- `POST /api/v1/assistant` with JSON body:
+  - `{"query":"find check_valve 20 mm kv 6 from danfoss","mode":"hybrid"}`
 - `GET /api/v1/health`
 - `GET /api/v1/openapi.json`
 
@@ -58,6 +63,13 @@ Optional API key auth:
 Rate limiting:
 
 - set `DCEF_RATE_LIMIT_PER_MIN` env var or pass `--rate-limit-per-minute`
+
+Hybrid AI assistant:
+
+- `mode=local`: deterministic parser only
+- `mode=remote`: remote parser via `DCEF_AI_ENDPOINT` with local fallback
+- `mode=hybrid`: local parser + remote overlay
+- optional remote credentials: `DCEF_AI_API_KEY`
 
 Python integration interface:
 
@@ -77,6 +89,10 @@ Vendor-split source files for data maintenance are in:
 - `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/src/datacenter_equipment_finder/data/vendors/`
 
 Use `dcef build-catalog` to validate and rebuild the consolidated catalog.
+Use `dcef sync-catalogs` to download datasheets locally.
+Use `dcef build-db` to build SQLite database:
+
+- `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/src/datacenter_equipment_finder/data/equipment_catalog.sqlite`
 
 ## GitHub Pages website
 

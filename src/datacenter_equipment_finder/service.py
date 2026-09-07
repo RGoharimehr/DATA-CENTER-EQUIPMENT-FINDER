@@ -42,6 +42,7 @@ class EquipmentService:
                 "cdu": ["size_mm", "capacity_kw_or_tons"],
                 "chiller": ["size_mm", "capacity_kw_or_tons"],
             },
+            "assistant_modes": ["local", "remote", "hybrid"],
         }
 
     def list_components(

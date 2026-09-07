@@ -144,6 +144,66 @@ function bindUi() {
     const out = checkCompatibility(partNumbers, requiredMaterial, maxTime, requiredConnectionStandard, requiredCoolant);
     document.getElementById("compatOut").textContent = JSON.stringify(out, null, 2);
   });
+
+  document.getElementById("assist").addEventListener("click", async () => {
+    const query = document.getElementById("aiQuery").value.trim();
+    const mode = document.getElementById("aiMode").value;
+    const apiBase = document.getElementById("apiBase").value.trim();
+    if (!query) {
+      document.getElementById("aiOut").textContent = "Please enter a query.";
+      return;
+    }
+
+    if (apiBase) {
+      try {
+        const res = await fetch(apiBase.replace(/\\/$/, "") + "/api/v1/assistant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, mode })
+        });
+        const data = await res.json();
+        document.getElementById("aiOut").textContent = JSON.stringify(data, null, 2);
+        return;
+      } catch (err) {
+        document.getElementById("aiOut").textContent = "API assistant request failed: " + err;
+        return;
+      }
+    }
+
+    const q = query.toLowerCase();
+    const pick = (arr) => arr.find((x) => q.includes(String(x).toLowerCase())) || null;
+    const categories = [...new Set(CATALOG.map((x) => x.category))];
+    const brands = [...new Set(CATALOG.map((x) => x.brand))];
+    const subtypes = [...new Set(CATALOG.map((x) => x.component_subtype).filter(Boolean))];
+    const mm = (q.match(/(\\d+(?:\\.\\d+)?)\\s*mm/) || [])[1];
+    const cv = (q.match(/(?:^|\\s)cv\\s*[:=]?\\s*(\\d+(?:\\.\\d+)?)/) || [])[1];
+    const kv = (q.match(/(?:^|\\s)kv\\s*[:=]?\\s*(\\d+(?:\\.\\d+)?)/) || [])[1];
+    const kw = (q.match(/(\\d+(?:\\.\\d+)?)\\s*k\\s*w/) || [])[1];
+    const tons = (q.match(/(\\d+(?:\\.\\d+)?)\\s*(?:tr|ton|tons)/) || [])[1];
+    const top = Number((q.match(/top\\s*(\\d+)/) || [])[1] || 5);
+
+    const filters = {
+      category: pick(categories),
+      component_subtype: pick(subtypes),
+      brand: pick(brands),
+      size_mm: mm ? Number(mm) : null,
+      cv: cv ? Number(cv) : null,
+      kv: kv ? Number(kv) : null,
+      capacity_kw: kw ? Number(kw) : null,
+      capacity_tons: tons ? Number(tons) : null,
+      top_n: Math.max(1, Math.min(top, 20))
+    };
+    const matches = findMatches(filters);
+    document.getElementById("aiOut").textContent = JSON.stringify({
+      ok: true,
+      data: {
+        mode_requested: mode,
+        mode_used: "local_static",
+        filters,
+        matches
+      }
+    }, null, 2);
+  });
 }
 
 fetch("./equipment_catalog.json")
