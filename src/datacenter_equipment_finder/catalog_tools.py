@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
 from urllib.error import URLError
@@ -79,4 +80,22 @@ def build_sqlite_database(csv_path: str | Path, sqlite_path: str | Path) -> int:
     finally:
         conn.close()
 
+    return len(rows)
+
+
+def export_web_catalog(csv_path: str | Path, json_path: str | Path) -> int:
+    """Write the packaged catalog to the JSON file consumed by the static docs site.
+
+    The GitHub Pages build serves a pre-rendered copy of the catalog, which
+    silently goes stale whenever vendor data changes. Regenerating it from the
+    same CSV keeps the published site and the package in step.
+    """
+    csv_file = Path(csv_path)
+    out_file = Path(json_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with csv_file.open("r", encoding="utf-8", newline="") as f:
+        rows = [{name: row.get(name, "") for name in FIELD_NAMES} for row in csv.DictReader(f)]
+
+    out_file.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     return len(rows)

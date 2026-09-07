@@ -5,7 +5,7 @@ from typing import Iterable, Optional
 from .models import EquipmentComponent, MatchResult
 from .units import cv_to_kv, inch_to_mm, kv_to_cv, tons_to_kw
 
-FLOW_COEFFICIENT_CATEGORIES = {"valve", "strainer"}
+FLOW_COEFFICIENT_CATEGORIES = {"valve", "strainer", "quick_disconnect"}
 
 
 def _normalized_delta(a: Optional[float], b: Optional[float], fallback: float = 1.0) -> float:

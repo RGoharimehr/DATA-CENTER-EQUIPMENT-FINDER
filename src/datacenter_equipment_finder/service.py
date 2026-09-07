@@ -38,6 +38,7 @@ class EquipmentService:
             "input_hints": {
                 "valve": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "cv_or_kv"],
                 "strainer": ["size_mm", "connection_size_mm_or_inch", "kv_or_cv"],
+                "quick_disconnect": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "cv_or_kv"],
                 "filter_dryer": ["size_mm", "connection_size_mm_or_inch", "capacity_kw_or_tons"],
                 "cdu": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "capacity_kw_or_tons"],
                 "chiller": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "capacity_kw_or_tons"],

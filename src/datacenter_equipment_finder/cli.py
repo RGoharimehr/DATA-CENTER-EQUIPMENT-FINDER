@@ -4,7 +4,7 @@ import argparse
 
 from .assistant import run_assistant_query
 from .catalog import EquipmentCatalog
-from .catalog_tools import build_sqlite_database, download_catalogs
+from .catalog_tools import build_sqlite_database, download_catalogs, export_web_catalog
 from .compatibility import check_compatibility
 from .dataset_pipeline import build_catalog_from_vendor_sources
 from .explanations import explain_category, explain_property
@@ -64,6 +64,10 @@ def _build_parser() -> argparse.ArgumentParser:
     db = sub.add_parser("build-db", help="Build SQLite database from catalog CSV")
     db.add_argument("--csv-path", default="src/datacenter_equipment_finder/data/equipment_catalog.csv")
     db.add_argument("--db-path", default="src/datacenter_equipment_finder/data/equipment_catalog.sqlite")
+
+    ew = sub.add_parser("export-web-catalog", help="Regenerate the static docs site catalog JSON")
+    ew.add_argument("--csv-path", default="src/datacenter_equipment_finder/data/equipment_catalog.csv")
+    ew.add_argument("--json-path", default="docs/equipment_catalog.json")
 
     pdf = sub.add_parser("build-db-from-pdf", help="Extract catalog rows from PDF and build CSV/SQLite output")
     pdf.add_argument("pdf_path")
@@ -167,6 +171,11 @@ def main() -> int:
     if args.command == "build-db":
         count = build_sqlite_database(args.csv_path, args.db_path)
         print(f"Rows loaded into SQLite: {count}")
+        return 0
+
+    if args.command == "export-web-catalog":
+        count = export_web_catalog(args.csv_path, args.json_path)
+        print(f"Rows exported to {args.json_path}: {count}")
         return 0
 
     if args.command == "build-db-from-pdf":

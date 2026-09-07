@@ -12,7 +12,7 @@ This project provides:
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - `pip`
 - optional: `uv` for faster environment setup
 - optional: a local AI endpoint such as Ollama
@@ -121,6 +121,9 @@ dcef find --category cdu --capacity-kw 500 --size-mm 50
 dcef find --category cdu --component-subtype in_row_cdu --connection-size-inch 2.5 --capacity-kw 1000 --top-n 3
 dcef compat LLD-20 DML-20 --max-connection-time 40 --required-material Copper
 dcef compat LXDU-450 JCI-CDU-1050 --required-connection-standard "ANSI B16.5" --required-coolant Water
+dcef find --category quick_disconnect --cv 2.4 --top-n 4
+dcef find --category quick_disconnect --component-subtype blind_mate_uqd --cv 1.25
+dcef explain --category quick_disconnect
 dcef explain --property flow_coefficient_value
 dcef explain --category cdu
 dcef assist --mode local --query "find in row cdu with 2.5 inch pipe connection around 1000 kW"
@@ -177,7 +180,7 @@ If you enable API key auth:
 
 For a simple local deployment on a laptop or workstation:
 
-1. install Python 3.10+
+1. install Python 3.11+
 2. create a virtual environment
 3. install with `pip install -e .`
 4. run `dcef serve --host 127.0.0.1 --port 8000`
@@ -310,9 +313,10 @@ Example assistant request body:
 
 ## Matching behavior
 
-- `valve` / `strainer`: use `cv` / `kv`, nominal size, and optional connection size
+- `valve` / `strainer` / `quick_disconnect`: use `cv` / `kv`, nominal size, and optional connection size
 - `filter_dryer` / `cdu` / `chiller`: use capacity, subtype, nominal size, and optional connection size
 - `cdu` / `chiller` / `filter_dryer` reject `cv` / `kv`
+- `quick_disconnect` rows always carry a Cv or Kv value
 - local assistant queries can infer phrases like:
   - `2 inch pipe`
   - `connection 50 mm`
@@ -321,15 +325,27 @@ Example assistant request body:
 
 ## Data files
 
-- `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/valves_strainers_filter_dryers.csv`
-- `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/src/datacenter_equipment_finder/data/equipment_catalog.csv`
-- `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/src/datacenter_equipment_finder/data/equipment_catalog.sqlite`
+- `valves_strainers_filter_dryers.csv`
+- `src/datacenter_equipment_finder/data/equipment_catalog.csv`
+- `src/datacenter_equipment_finder/data/equipment_catalog.sqlite`
 
-The packaged CSV uses a unified schema for Parker/Danfoss valves, strainers, filter-dryers, CDUs, and chillers.
+### Data provenance rules
+
+Every catalog row must be traceable to a published vendor document. These rules
+are enforced by `tests/test_catalog_data_quality.py`:
+
+1. `source_catalog` and `datasheet_url` are required on every row, and the URL must be a real published document.
+2. Specifications are transcribed from that document. Values are never inferred, interpolated between models, or estimated.
+3. `part_number` uses the manufacturer's own SKU where one is published. Where a vendor publishes a product designation but no public SKU (common for CDUs), the vendor's designation is used verbatim - for example `CoolChip CDU 1350` or `Boyd 10U CDU`.
+4. Where different vendors publish different figures for the same nominal UQD size, each vendor's own published figure is recorded. The spread between them is real and is exactly what the finder is meant to surface.
+5. `estimated_price_usd` and `install_connection_time_min` are the only estimated fields. Leave them blank rather than guessing.
+6. Unit pairs must agree: `capacity_kw` / `capacity_tons` within 2%, `nominal_size_mm` / `nominal_size_inch` within 5%.
+
+The packaged CSV uses a unified schema for Parker/Danfoss valves, strainers, filter-dryers, CDUs, chillers, and OCP UQD quick disconnects.
 
 Vendor source CSVs are in:
 
-- `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/src/datacenter_equipment_finder/data/vendors/`
+- `src/datacenter_equipment_finder/data/vendors/`
 
 Useful commands:
 
@@ -337,16 +353,25 @@ Useful commands:
 dcef build-catalog
 dcef sync-catalogs --limit 5
 dcef build-db
+dcef export-web-catalog
 ```
 
 ## GitHub Pages website
 
 Static website source:
 
-- `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/docs/index.html`
+- `docs/index.html`
 
 Deployment workflow:
 
-- `/home/runner/work/DATA-CENTER-EQUIPMENT-FINDER/DATA-CENTER-EQUIPMENT-FINDER/.github/workflows/pages.yml`
+- `.github/workflows/pages.yml`
 
 After enabling **Pages (GitHub Actions)** in repository settings, the static site is published from the workflow artifact.
+
+`docs/equipment_catalog.json` is a pre-rendered copy of the packaged catalog. After changing vendor data, regenerate it with:
+
+```bash
+dcef export-web-catalog
+```
+
+`tests/test_catalog_tools.py` fails if it drifts out of sync.

@@ -14,6 +14,27 @@ from .service import EquipmentService
 from .units import inch_to_mm
 
 
+# Terms engineers actually type, mapped to the catalog category they mean.
+CATEGORY_ALIASES: dict[str, tuple[str, ...]] = {
+    "quick_disconnect": (
+        "uqd",
+        "uqdb",
+        "quick disconnect",
+        "quick connect",
+        "quick coupling",
+        "dry break",
+        "drybreak",
+        "blind mate",
+        "coupling",
+        "connector",
+    ),
+}
+
+SUBTYPE_ALIASES: dict[str, tuple[str, ...]] = {
+    "blind_mate_uqd": ("uqdb", "blind mate", "blindmate"),
+}
+
+
 @dataclass(frozen=True)
 class AssistantConfig:
     endpoint: str | None = None
@@ -78,6 +99,20 @@ def _best_schema_term(text: str, candidates: list[str], *, minimum_score: float 
     return None
 
 
+def _match_alias(text: str, aliases: dict[str, tuple[str, ...]], allowed: list[str]) -> str | None:
+    normalized = _normalize_text(text)
+    best: str | None = None
+    best_len = 0
+    for target, terms in aliases.items():
+        if target not in allowed:
+            continue
+        for term in terms:
+            if term in normalized and len(term) > best_len:
+                best = target
+                best_len = len(term)
+    return best
+
+
 def _tokenize(text: str) -> list[str]:
     cleaned = []
     for ch in text.lower():
@@ -138,7 +173,38 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _parse_fractional_inches(raw: str) -> float | None:
+    raw = raw.strip()
+    if "/" in raw:
+        whole = 0.0
+        parts = raw.split()
+        if len(parts) == 2:
+            leading = _as_float(parts[0])
+            if leading is None:
+                return None
+            whole = leading
+            raw = parts[1]
+        numerator, _, denominator = raw.partition("/")
+        num = _as_float(numerator)
+        den = _as_float(denominator)
+        if num is None or den in (None, 0.0):
+            return None
+        assert den is not None
+        return whole + num / den
+    return _as_float(raw)
+
+
 def _extract_connection_size(text: str) -> tuple[float | None, float | None]:
+    fraction = re.search(
+        r"(?:(\d+)\s+)?(\d+\s*/\s*\d+)\s*(?:in\b|inch|inches|\")",
+        text,
+    )
+    if fraction:
+        raw = (fraction.group(1) + " " if fraction.group(1) else "") + fraction.group(2).replace(" ", "")
+        value = _parse_fractional_inches(raw)
+        if value is not None:
+            return inch_to_mm(value), value
+
     patterns = (
         r"(?:pipe|piping|connection|port|line|diameter|dn)\s*(?:size)?\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(mm|millimeter|millimeters|in|inch|inches|\")",
         r"(\d+(?:\.\d+)?)\s*(mm|millimeter|millimeters|in|inch|inches|\")\s*(?:pipe|piping|connection|port|line|diameter|id|od|dn)",
@@ -257,6 +323,8 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     schema = service.schema()
 
     category = _best_schema_term(t, schema["categories"], minimum_score=90.0)
+    if category is None:
+        category = _match_alias(t, CATEGORY_ALIASES, schema["categories"])
 
     component_subtype = None
     if category:
@@ -266,6 +334,8 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
             component_subtype = _best_schema_term(t, subtypes, minimum_score=88.0)
             if component_subtype:
                 break
+    if component_subtype is None and category:
+        component_subtype = _match_alias(t, SUBTYPE_ALIASES, schema["subtypes_by_category"].get(category, []))
     if category is None:
         category = _infer_category_from_subtype(service, component_subtype)
 
