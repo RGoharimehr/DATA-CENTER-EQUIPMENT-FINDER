@@ -11,6 +11,7 @@ from .models import EquipmentComponent
 FIELD_NAMES = [
     "brand",
     "category",
+    "component_subtype",
     "series_name",
     "component_name",
     "nominal_size_mm",
@@ -70,6 +71,7 @@ class EquipmentCatalog:
                     EquipmentComponent(
                         brand=row["brand"].strip(),
                         category=row["category"].strip(),
+                        component_subtype=_to_str(row["component_subtype"]),
                         series_name=row["series_name"].strip(),
                         component_name=row["component_name"].strip(),
                         nominal_size_mm=_to_float(row["nominal_size_mm"]),

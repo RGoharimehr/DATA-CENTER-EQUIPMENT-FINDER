@@ -5,6 +5,8 @@ from typing import Iterable, Optional
 from .models import EquipmentComponent, MatchResult
 from .units import kv_to_cv, cv_to_kv, tons_to_kw
 
+FLOW_COEFFICIENT_CATEGORIES = {"valve", "strainer"}
+
 
 def _normalized_delta(a: Optional[float], b: Optional[float], fallback: float = 1.0) -> float:
     if a is None or b is None:
@@ -35,6 +37,7 @@ def find_closest_components(
     components: Iterable[EquipmentComponent],
     *,
     category: Optional[str] = None,
+    component_subtype: Optional[str] = None,
     brand: Optional[str] = None,
     target_size_mm: Optional[float] = None,
     target_cv: Optional[float] = None,
@@ -46,6 +49,8 @@ def find_closest_components(
     filtered = []
     for c in components:
         if category and c.category.lower() != category.lower():
+            continue
+        if component_subtype and (c.component_subtype or "").lower() != component_subtype.lower():
             continue
         if brand and c.brand.lower() != brand.lower():
             continue
@@ -59,9 +64,9 @@ def find_closest_components(
         score = 0.0
         score += _normalized_delta(c.nominal_size_mm, target_size_mm, fallback=0.2)
 
-        coeff_for_target = _coefficient_for_target(c, target_cv, target_kv)
         target_coeff = target_cv if target_cv is not None else target_kv
-        if target_coeff is not None:
+        if target_coeff is not None and c.category.lower() in FLOW_COEFFICIENT_CATEGORIES:
+            coeff_for_target = _coefficient_for_target(c, target_cv, target_kv)
             score += _normalized_delta(coeff_for_target, target_coeff, fallback=0.6)
 
         score += _normalized_delta(c.capacity_kw, target_capacity_kw, fallback=0.3)

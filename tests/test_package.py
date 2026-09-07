@@ -15,6 +15,7 @@ class PackageTests(unittest.TestCase):
         chiller_vendors = {c.brand for c in self.catalog.components if c.category == "chiller"}
         self.assertGreaterEqual(len(cdu_vendors), 2)
         self.assertGreaterEqual(len(chiller_vendors), 2)
+        self.assertIn("Johnson Controls", cdu_vendors)
 
     def test_unit_conversion_roundtrips(self):
         self.assertAlmostEqual(mm_to_inch(inch_to_mm(2.0)), 2.0, places=6)
@@ -25,11 +26,22 @@ class PackageTests(unittest.TestCase):
         result = find_closest_components(
             self.catalog.components,
             category="valve",
+            component_subtype="shutoff_valve",
             target_size_mm=20,
             target_cv=7.0,
             top_n=1,
         )[0]
         self.assertEqual(result.component.part_number, "S4A-20")
+
+    def test_find_by_valve_subtype(self):
+        result = find_closest_components(
+            self.catalog.components,
+            category="valve",
+            component_subtype="check_valve",
+            target_size_mm=20,
+            top_n=2,
+        )
+        self.assertTrue(all((m.component.component_subtype or "") == "check_valve" for m in result))
 
     def test_compatibility_detects_connection_time_limit(self):
         parts = [

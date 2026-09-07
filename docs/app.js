@@ -21,6 +21,7 @@ function ndelta(a, b, fallback = 1) {
 function findMatches(params) {
   const filtered = CATALOG.filter((c) => {
     if (params.category && String(c.category).toLowerCase() !== params.category.toLowerCase()) return false;
+    if (params.component_subtype && String(c.component_subtype || "").toLowerCase() !== params.component_subtype.toLowerCase()) return false;
     if (params.brand && String(c.brand).toLowerCase() !== params.brand.toLowerCase()) return false;
     return true;
   });
@@ -28,7 +29,8 @@ function findMatches(params) {
   const scored = filtered.map((c) => {
     let score = 0;
     score += ndelta(toNum(c.nominal_size_mm), params.size_mm, 0.2);
-    if (params.cv != null || params.kv != null) {
+    const allowsFlow = ["valve", "strainer"].includes(String(c.category || "").toLowerCase());
+    if (allowsFlow && (params.cv != null || params.kv != null)) {
       score += ndelta(coeffForTarget(c, params.cv, params.kv), params.cv ?? params.kv, 0.6);
     }
     score += ndelta(toNum(c.capacity_kw), params.capacity_kw, 0.3);
@@ -39,9 +41,11 @@ function findMatches(params) {
   return scored.sort((a, b) => a.score - b.score).slice(0, Math.max(1, params.top_n));
 }
 
-function checkCompatibility(partNumbers, requiredMaterial, maxTime) {
+function checkCompatibility(partNumbers, requiredMaterial, maxTime, requiredConnectionStandard, requiredCoolant) {
   const picked = CATALOG.filter((x) => partNumbers.some((p) => String(x.part_number).toLowerCase() === p.toLowerCase()));
   const reasons = [];
+  const hyd = new Set(["valve", "strainer", "filter_dryer"]);
+  const thermal = new Set(["cdu", "chiller"]);
 
   const eq = {
     NPT: new Set(["NPT", "FPT"]), FPT: new Set(["NPT", "FPT"]),
@@ -51,8 +55,15 @@ function checkCompatibility(partNumbers, requiredMaterial, maxTime) {
     for (let j = i + 1; j < picked.length; j++) {
       const a = (picked[i].connection_type || "").toUpperCase();
       const b = (picked[j].connection_type || "").toUpperCase();
-      if (a && b && a !== b && !(eq[a] && eq[a].has(b))) {
+      const ca = String(picked[i].category || "").toLowerCase();
+      const cb = String(picked[j].category || "").toLowerCase();
+      if (hyd.has(ca) && hyd.has(cb) && a && b && a !== b && !(eq[a] && eq[a].has(b))) {
         reasons.push(`Connection mismatch: ${picked[i].part_number}(${a}) vs ${picked[j].part_number}(${b})`);
+      }
+      const sa = String(picked[i].connection_standard || "");
+      const sb = String(picked[j].connection_standard || "");
+      if (thermal.has(ca) && thermal.has(cb) && sa && sb && sa.toLowerCase() !== sb.toLowerCase()) {
+        reasons.push(`Connection standard mismatch: ${picked[i].part_number}(${sa}) vs ${picked[j].part_number}(${sb})`);
       }
     }
   }
@@ -68,7 +79,24 @@ function checkCompatibility(partNumbers, requiredMaterial, maxTime) {
   if (maxTime != null) {
     for (const p of picked) {
       const t = toNum(p.install_connection_time_min);
-      if (t != null && t > maxTime) reasons.push(`Connection time too high: ${p.part_number} requires ${t} min`);
+      const c = String(p.category || "").toLowerCase();
+      if (hyd.has(c) && t != null && t > maxTime) reasons.push(`Connection time too high: ${p.part_number} requires ${t} min`);
+    }
+  }
+
+  if (requiredConnectionStandard) {
+    for (const p of picked) {
+      if (p.connection_standard && String(p.connection_standard).toLowerCase() !== requiredConnectionStandard.toLowerCase()) {
+        reasons.push(`Connection standard mismatch: ${p.part_number} standard=${p.connection_standard}, required=${requiredConnectionStandard}`);
+      }
+    }
+  }
+
+  if (requiredCoolant) {
+    for (const p of picked) {
+      if (p.coolant_compatibility && !String(p.coolant_compatibility).toLowerCase().includes(requiredCoolant.toLowerCase())) {
+        reasons.push(`Coolant mismatch: ${p.part_number} coolant=${p.coolant_compatibility}, required contains=${requiredCoolant}`);
+      }
     }
   }
 
@@ -76,9 +104,26 @@ function checkCompatibility(partNumbers, requiredMaterial, maxTime) {
 }
 
 function bindUi() {
+  const categoryEl = document.getElementById("category");
+  const cvEl = document.getElementById("cv");
+  const kvEl = document.getElementById("kv");
+  function syncInputHints() {
+    const c = categoryEl.value;
+    const flowEnabled = !c || c === "valve" || c === "strainer";
+    cvEl.disabled = !flowEnabled;
+    kvEl.disabled = !flowEnabled;
+    if (!flowEnabled) {
+      cvEl.value = "";
+      kvEl.value = "";
+    }
+  }
+  categoryEl.addEventListener("change", syncInputHints);
+  syncInputHints();
+
   document.getElementById("find").addEventListener("click", () => {
     const params = {
-      category: document.getElementById("category").value.trim() || null,
+      category: categoryEl.value.trim() || null,
+      component_subtype: document.getElementById("subtype").value.trim() || null,
       brand: document.getElementById("brand").value.trim() || null,
       size_mm: toNum(document.getElementById("size").value),
       cv: toNum(document.getElementById("cv").value),
@@ -93,8 +138,10 @@ function bindUi() {
   document.getElementById("compat").addEventListener("click", () => {
     const partNumbers = document.getElementById("parts").value.split(",").map((x) => x.trim()).filter(Boolean);
     const requiredMaterial = document.getElementById("material").value.trim() || null;
+    const requiredConnectionStandard = document.getElementById("connStd").value.trim() || null;
+    const requiredCoolant = document.getElementById("coolant").value.trim() || null;
     const maxTime = toNum(document.getElementById("maxTime").value);
-    const out = checkCompatibility(partNumbers, requiredMaterial, maxTime);
+    const out = checkCompatibility(partNumbers, requiredMaterial, maxTime, requiredConnectionStandard, requiredCoolant);
     document.getElementById("compatOut").textContent = JSON.stringify(out, null, 2);
   });
 }

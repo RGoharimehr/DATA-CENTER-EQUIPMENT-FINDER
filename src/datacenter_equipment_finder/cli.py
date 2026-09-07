@@ -16,6 +16,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     f = sub.add_parser("find", help="Find closest components")
     f.add_argument("--category", required=False)
+    f.add_argument("--component-subtype", required=False)
     f.add_argument("--brand", required=False)
     f.add_argument("--size-mm", type=float, required=False)
     f.add_argument("--cv", type=float, required=False)
@@ -28,6 +29,8 @@ def _build_parser() -> argparse.ArgumentParser:
     c.add_argument("part_numbers", nargs="+", help="Part numbers to evaluate")
     c.add_argument("--max-connection-time", type=float)
     c.add_argument("--required-material")
+    c.add_argument("--required-connection-standard")
+    c.add_argument("--required-coolant")
 
     e = sub.add_parser("explain", help="Explain a property or category")
     e.add_argument("--property", dest="property_name")
@@ -49,12 +52,15 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
-    catalog = EquipmentCatalog.from_csv()
 
     if args.command == "find":
+        if (args.cv is not None or args.kv is not None) and (args.category or "").lower() in {"cdu", "chiller", "filter_dryer"}:
+            parser.error(f"--cv/--kv are not applicable for category '{args.category}'")
+        catalog = EquipmentCatalog.from_csv()
         matches = find_closest_components(
             catalog.components,
             category=args.category,
+            component_subtype=args.component_subtype,
             brand=args.brand,
             target_size_mm=args.size_mm,
             target_cv=args.cv,
@@ -73,6 +79,7 @@ def main() -> int:
         return 0
 
     if args.command == "compat":
+        catalog = EquipmentCatalog.from_csv()
         selected = [
             c for c in catalog.components if c.part_number.lower() in {p.lower() for p in args.part_numbers}
         ]
@@ -80,6 +87,8 @@ def main() -> int:
             selected,
             max_install_connection_time_min=args.max_connection_time,
             required_material=args.required_material,
+            required_connection_standard=args.required_connection_standard,
+            required_coolant=args.required_coolant,
         )
         print(f"compatible={report.is_compatible}")
         for reason in report.reasons:

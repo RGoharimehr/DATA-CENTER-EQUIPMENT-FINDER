@@ -8,6 +8,7 @@ from typing import Optional
 class EquipmentComponent:
     brand: str
     category: str
+    component_subtype: Optional[str]
     series_name: str
     component_name: str
     nominal_size_mm: Optional[float]

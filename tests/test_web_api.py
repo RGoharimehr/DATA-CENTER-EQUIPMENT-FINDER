@@ -37,7 +37,7 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("brands", payload["data"])
 
     def test_find_endpoint(self):
-        payload = self._get_json(f"{API_PREFIX}/find?category=valve&size_mm=20&cv=7&top_n=1")
+        payload = self._get_json(f"{API_PREFIX}/find?category=valve&component_subtype=shutoff_valve&size_mm=20&cv=7&top_n=1")
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"][0]["component"]["part_number"], "S4A-20")
 
@@ -61,13 +61,18 @@ class WebApiTests(unittest.TestCase):
         self.assertGreaterEqual(payload["data"]["selected_count"], 2)
 
     def test_legacy_route_still_works(self):
-        payload = self._get_json("/api/find?category=valve&size_mm=20&cv=7&top_n=1")
+        payload = self._get_json("/api/find?category=valve&component_subtype=shutoff_valve&size_mm=20&cv=7&top_n=1")
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["data"][0]["component"]["part_number"], "S4A-20")
 
     def test_invalid_find_request_fails(self):
         with self.assertRaises(HTTPError) as ctx:
             self._get_json(f"{API_PREFIX}/find?cv=1&kv=1")
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_cdu_rejects_cv_kv_input(self):
+        with self.assertRaises(HTTPError) as ctx:
+            self._get_json(f"{API_PREFIX}/find?category=cdu&cv=2")
         self.assertEqual(ctx.exception.code, 400)
 
 

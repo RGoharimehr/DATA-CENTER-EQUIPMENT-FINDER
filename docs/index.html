@@ -20,12 +20,20 @@
   <div class="card">
     <h3>Closest match search</h3>
     <div class="row">
-      <input id="category" placeholder="category (optional)" />
+      <select id="category">
+        <option value="">category (any)</option>
+        <option value="valve">valve</option>
+        <option value="strainer">strainer</option>
+        <option value="filter_dryer">filter_dryer</option>
+        <option value="cdu">cdu</option>
+        <option value="chiller">chiller</option>
+      </select>
+      <input id="subtype" placeholder="subtype (optional)" />
       <input id="brand" placeholder="brand (optional)" />
       <input id="size" type="number" step="any" placeholder="size mm" />
-      <input id="cv" type="number" step="any" placeholder="cv" />
-      <input id="kv" type="number" step="any" placeholder="kv" />
-      <input id="cap" type="number" step="any" placeholder="capacity kW" />
+      <input id="cv" type="number" step="any" placeholder="cv (valve/strainer)" />
+      <input id="kv" type="number" step="any" placeholder="kv (valve/strainer)" />
+      <input id="cap" type="number" step="any" placeholder="capacity kW (CDU/chiller/filter_dryer)" />
       <input id="topn" type="number" value="5" min="1" max="50" />
       <button id="find">Find</button>
     </div>
@@ -37,6 +45,8 @@
     <div class="row">
       <input id="parts" placeholder="part numbers: LLD-20,DML-20" style="min-width: 320px;" />
       <input id="material" placeholder="required material (optional)" />
+      <input id="connStd" placeholder="required connection standard (optional)" />
+      <input id="coolant" placeholder="required coolant token (optional)" />
       <input id="maxTime" type="number" step="any" placeholder="max connection time (min)" />
       <button id="compat">Check</button>
     </div>

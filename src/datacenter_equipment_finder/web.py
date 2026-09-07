@@ -33,21 +33,44 @@ HTML_INDEX = """<!doctype html>
   <h1>Data Center Equipment Finder</h1>
   <p>API version: <code>v1</code></p>
   <div class="row">
-    <label>Category <input id="category" placeholder="valve/cdu/chiller"></label>
+    <label>Category
+      <select id="category" onchange="onCategoryChange()">
+        <option value="">(any)</option>
+        <option value="valve">valve</option>
+        <option value="strainer">strainer</option>
+        <option value="filter_dryer">filter_dryer</option>
+        <option value="cdu">cdu</option>
+        <option value="chiller">chiller</option>
+      </select>
+    </label>
+    <label>Subtype <input id="subtype" placeholder="isolation_valve/check_valve"></label>
     <label>Brand <input id="brand" placeholder="Parker/Vertiv"></label>
     <label>Size (mm) <input id="size" type="number" step="any"></label>
-    <label>Cv <input id="cv" type="number" step="any"></label>
-    <label>Kv <input id="kv" type="number" step="any"></label>
-    <label>Capacity kW <input id="capkw" type="number" step="any"></label>
+    <label id="cv-wrap">Cv <input id="cv" type="number" step="any"></label>
+    <label id="kv-wrap">Kv <input id="kv" type="number" step="any"></label>
+    <label id="cap-wrap">Capacity kW <input id="capkw" type="number" step="any"></label>
     <label>Top N <input id="topn" type="number" value="5"></label>
     <button onclick="findMatches()">Find</button>
   </div>
   <h3>Results</h3>
   <pre id="out">Run a search.</pre>
   <script>
+    function onCategoryChange() {
+      const cat = document.getElementById('category').value;
+      const showFlow = (cat === 'valve' || cat === 'strainer' || cat === '');
+      const showCap = (cat === 'filter_dryer' || cat === 'cdu' || cat === 'chiller' || cat === '');
+      document.getElementById('cv-wrap').style.display = showFlow ? '' : 'none';
+      document.getElementById('kv-wrap').style.display = showFlow ? '' : 'none';
+      document.getElementById('cap-wrap').style.display = showCap ? '' : 'none';
+      if (!showFlow) {
+        document.getElementById('cv').value = '';
+        document.getElementById('kv').value = '';
+      }
+    }
     async function findMatches() {
       const params = new URLSearchParams({
         category: document.getElementById('category').value,
+        component_subtype: document.getElementById('subtype').value,
         brand: document.getElementById('brand').value,
         size_mm: document.getElementById('size').value,
         cv: document.getElementById('cv').value,
@@ -59,6 +82,7 @@ HTML_INDEX = """<!doctype html>
       const data = await res.json();
       document.getElementById('out').textContent = JSON.stringify(data, null, 2);
     }
+    onCategoryChange();
   </script>
 </body>
 </html>
@@ -148,6 +172,7 @@ def _text_response(handler: BaseHTTPRequestHandler, text: str, status: int = 200
 
 def _validate_find_inputs(query: dict[str, list[str]]) -> tuple[bool, str | None]:
     try:
+        category = (_first(query, "category") or "").lower()
         top_n = _to_int(query, "top_n", 5)
         if top_n < 1 or top_n > 100:
             return False, "top_n must be between 1 and 100"
@@ -157,6 +182,10 @@ def _validate_find_inputs(query: dict[str, list[str]]) -> tuple[bool, str | None
                 return False, f"{key} must be non-negative"
         if _to_float(query, "cv") is not None and _to_float(query, "kv") is not None:
             return False, "Provide either cv or kv, not both"
+        if category in {"cdu", "chiller", "filter_dryer"} and (
+            _to_float(query, "cv") is not None or _to_float(query, "kv") is not None
+        ):
+            return False, f"Cv/Kv inputs are not applicable for category '{category}'"
     except ValueError as exc:
         return False, f"Invalid numeric value: {exc}"
     return True, None
@@ -241,6 +270,7 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                         raise ValueError("offset must be >= 0")
                     payload = service.list_components(
                         category=_first(query, "category"),
+                        component_subtype=_first(query, "component_subtype"),
                         brand=_first(query, "brand"),
                         limit=limit,
                         offset=offset,
@@ -270,6 +300,7 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                     return
                 payload = service.find_components(
                     category=_first(query, "category"),
+                    component_subtype=_first(query, "component_subtype"),
                     brand=_first(query, "brand"),
                     size_mm=_to_float(query, "size_mm"),
                     cv=_to_float(query, "cv"),
@@ -334,11 +365,19 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                 required_material = payload.get("required_material")
                 if required_material is not None and not isinstance(required_material, str):
                     raise ValueError("required_material must be a string")
+                required_connection_standard = payload.get("required_connection_standard")
+                if required_connection_standard is not None and not isinstance(required_connection_standard, str):
+                    raise ValueError("required_connection_standard must be a string")
+                required_coolant = payload.get("required_coolant")
+                if required_coolant is not None and not isinstance(required_coolant, str):
+                    raise ValueError("required_coolant must be a string")
 
                 report = service.compatibility(
                     part_numbers,
                     max_connection_time=max_connection_time,
                     required_material=required_material,
+                    required_connection_standard=required_connection_standard,
+                    required_coolant=required_coolant,
                 )
                 _json_response(self, _envelope_ok(report), 200)
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
