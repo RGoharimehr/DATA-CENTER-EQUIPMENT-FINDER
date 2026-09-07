@@ -113,6 +113,25 @@ def _match_alias(text: str, aliases: dict[str, tuple[str, ...]], allowed: list[s
     return best
 
 
+def _best_brand(text: str, brands: list[str], *, minimum_score: float = 82.0) -> str | None:
+    for brand in brands:
+        if _contains_term(text, brand):
+            return brand
+
+    tokens = [t for t in _tokenize(_normalize_text(text)) if len(t) >= 4]
+    best: str | None = None
+    best_score = 0.0
+    for brand in brands:
+        lowered = brand.lower()
+        if len(lowered) < 4:
+            continue
+        for token in tokens:
+            score = fuzz.ratio(lowered, token)
+            if score > best_score:
+                best, best_score = brand, score
+    return best if best_score >= minimum_score else None
+
+
 def _tokenize(text: str) -> list[str]:
     cleaned = []
     for ch in text.lower():
@@ -223,6 +242,32 @@ def _extract_connection_size(text: str) -> tuple[float | None, float | None]:
     return None, None
 
 
+def _extract_required_pressure_bar(text: str) -> float | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(bar|barg|psi|psig)\b", text)
+    if not match:
+        return None
+    value = _as_float(match.group(1))
+    if value is None:
+        return None
+    return value if match.group(2).startswith("bar") else value / 14.5037738
+
+
+def _extract_required_temperature_c(text: str) -> float | None:
+    # Only treat a temperature as a duty requirement when the query frames it as one.
+    # "1350 kW at 4 C approach" states a rating condition, not a coolant temperature.
+    if not re.search(r"coolant|fluid|water|temperature|supply|return|hot|deg", text):
+        return None
+    if re.search(r"\bapproach\b", text):
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(?:deg(?:rees)?\s*)?(?:\u00b0\s*)?(c|celsius|f|fahrenheit)\b", text)
+    if not match:
+        return None
+    value = _as_float(match.group(1))
+    if value is None:
+        return None
+    return value if match.group(2).startswith(("c", "celsius")) else (value - 32.0) * 5.0 / 9.0
+
+
 def _infer_category_from_subtype(service: EquipmentService, component_subtype: str | None) -> str | None:
     if not component_subtype:
         return None
@@ -257,7 +302,8 @@ def _local_model_prompt(text: str, service: EquipmentService) -> str:
     return (
         "Extract structured filters for the Data Center Equipment Finder.\n"
         "Return JSON only with keys: category, component_subtype, brand, size_mm, cv, kv, capacity_kw, "
-        "capacity_tons, connection_size_mm, connection_size_inch, top_n.\n"
+        "capacity_tons, connection_size_mm, connection_size_inch, required_pressure_bar, "
+        "required_temperature_c, top_n.\n"
         "Use null for unknown values. Prefer catalog-supported categories and subtypes.\n"
         f"Categories: {schema['categories']}\n"
         f"Subtypes by category: {schema['subtypes_by_category']}\n"
@@ -339,14 +385,20 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     if category is None:
         category = _infer_category_from_subtype(service, component_subtype)
 
-    brand = _best_schema_term(t, schema["brands"], minimum_score=78.0)
+    brand = _best_brand(t, schema["brands"])
 
     size_mm = _extract_before_unit(tokens, {"mm"})
     cv = _extract_prefixed_value(tokens, "cv")
     kv = _extract_prefixed_value(tokens, "kv")
     capacity_kw = _extract_before_unit(tokens, {"kw", "kilowatt", "kilowatts"})
+    if capacity_kw is None:
+        megawatts = _extract_before_unit(tokens, {"mw", "megawatt", "megawatts"})
+        if megawatts is not None:
+            capacity_kw = megawatts * 1000.0
     capacity_tons = _extract_before_unit(tokens, {"tr", "ton", "tons"})
     connection_size_mm, connection_size_inch = _extract_connection_size(t)
+    required_pressure_bar = _extract_required_pressure_bar(t)
+    required_temperature_c = _extract_required_temperature_c(t)
     top_n = _extract_top_n(tokens, default=5)
 
     filters: dict[str, Any] = {
@@ -360,6 +412,8 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
         "capacity_tons": capacity_tons,
         "connection_size_mm": connection_size_mm,
         "connection_size_inch": connection_size_inch,
+        "required_pressure_bar": required_pressure_bar,
+        "required_temperature_c": required_temperature_c,
         "top_n": max(1, min(top_n, 20)),
     }
     filters["checks"] = _validate_local_filters(filters)
@@ -448,8 +502,21 @@ def run_assistant_query(
         capacity_tons=filters.get("capacity_tons"),
         connection_size_mm=filters.get("connection_size_mm"),
         connection_size_inch=filters.get("connection_size_inch"),
+        required_pressure_bar=filters.get("required_pressure_bar"),
+        required_temperature_c=filters.get("required_temperature_c"),
         top_n=int(filters.get("top_n") or 5),
     )
+
+    if not matches:
+        limits = []
+        if filters.get("required_pressure_bar") is not None:
+            limits.append(f"{float(filters['required_pressure_bar']):g} bar")
+        if filters.get("required_temperature_c") is not None:
+            limits.append(f"{float(filters['required_temperature_c']):g} C")
+        if limits:
+            filters["checks"] = list(filters.get("checks", [])) + [
+                "No catalog component is rated for " + " and ".join(limits) + "."
+            ]
 
     return {
         "mode_requested": normalized_mode,

@@ -311,6 +311,47 @@ Example assistant request body:
 {"query":"find check_valve 20 mm kv 6 from danfoss","mode":"hybrid"}
 ```
 
+## Duty limits
+
+State the pressure or coolant temperature the part has to survive and under-rated
+components are removed from the results rather than ranked low:
+
+```bash
+dcef find --category quick_disconnect --cv 2.4 --required-pressure-bar 15
+dcef find --category quick_disconnect --cv 2.4 --required-temperature-c 70
+```
+
+```text
+GET /api/v1/find?category=quick_disconnect&cv=2.4&required_pressure_bar=15
+```
+
+The assistant reads them from plain language too - `"quick disconnect rated for 15 bar"`,
+`"UQD for 70 C coolant temperature"`, `"a 150 psi system"`. A rating condition such as
+`"1350 kW at 4 C approach"` is not treated as a duty limit.
+
+Rules:
+
+- A component is excluded only when its **published** rating is below the stated duty.
+- A component with no published rating is kept and carries a warning, because an
+  unknown rating cannot be proven inadequate.
+- If nothing qualifies, the CLI says so and exits non-zero, and the assistant returns
+  no matches plus an explicit check. It never quietly relaxes the limit.
+
+## Match scores
+
+A score is the weighted mean relative error across the criteria you actually
+constrained, so `0.02` means roughly 2% off and scores are comparable between queries.
+Lower is better.
+
+- Capacity dominates for `cdu` / `chiller` / `filter_dryer`; flow coefficient dominates
+  for `valve` / `strainer` / `quick_disconnect`. Connection size is a secondary term,
+  so a CDU three times off the requested duty cannot win on pipe size alone.
+- A component with no value for a criterion you asked about is scored at 0.75 for it:
+  worse than any match within 75%, better than a wilder one. Missing data no longer
+  wins by default.
+- Unverified rows take a 0.05 penalty and carry a warning, so they lose ties but can
+  still win on merit.
+
 ## Matching behavior
 
 - `valve` / `strainer` / `quick_disconnect`: use `cv` / `kv`, nominal size, and optional connection size

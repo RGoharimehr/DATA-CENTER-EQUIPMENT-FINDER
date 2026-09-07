@@ -29,6 +29,10 @@ def _build_parser() -> argparse.ArgumentParser:
     f.add_argument("--capacity-tons", type=float, required=False)
     f.add_argument("--connection-size-mm", type=float, required=False)
     f.add_argument("--connection-size-inch", type=float, required=False)
+    f.add_argument("--required-pressure-bar", type=float, default=None,
+                   help="Exclude parts rated below this working pressure")
+    f.add_argument("--required-temperature-c", type=float, default=None,
+                   help="Exclude parts rated below this maximum temperature")
     f.add_argument("--top-n", type=int, default=5)
 
     c = sub.add_parser("compat", help="Check compatibility for part numbers")
@@ -98,8 +102,19 @@ def main() -> int:
             target_capacity_tons=args.capacity_tons,
             target_connection_size_mm=args.connection_size_mm,
             target_connection_size_inch=args.connection_size_inch,
+            required_pressure_bar=args.required_pressure_bar,
+            required_temperature_c=args.required_temperature_c,
             top_n=args.top_n,
         )
+        if not matches:
+            limits = []
+            if args.required_pressure_bar is not None:
+                limits.append(f"{args.required_pressure_bar:g} bar")
+            if args.required_temperature_c is not None:
+                limits.append(f"{args.required_temperature_c:g} C")
+            detail = f" rated for {' and '.join(limits)}" if limits else ""
+            print(f"No catalog component matches this request{detail}.")
+            return 1
         for i, m in enumerate(matches, start=1):
             c = m.component
             print(
@@ -107,6 +122,8 @@ def main() -> int:
                 f"| coeff={c.flow_coefficient_type}:{c.flow_coefficient_value} | cap_kw={c.capacity_kw} "
                 f"| conn={c.connection_type} | material={c.material} | score={m.score:.4f}"
             )
+            for warning in m.warnings:
+                print(f"     warning: {warning}")
         return 0
 
     if args.command == "compat":

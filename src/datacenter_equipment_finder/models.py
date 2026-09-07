@@ -39,3 +39,6 @@ class EquipmentComponent:
 class MatchResult:
     component: EquipmentComponent
     score: float
+    # Non-fatal caveats: an unpublished rating that could not be checked against
+    # the stated duty, or a row whose specs are unverified.
+    warnings: tuple[str, ...] = ()

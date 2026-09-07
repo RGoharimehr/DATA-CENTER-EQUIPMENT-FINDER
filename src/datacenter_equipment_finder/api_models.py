@@ -52,6 +52,8 @@ class FindQuery(_BaseRequestModel):
     kv: float | None = None
     capacity_kw: float | None = None
     capacity_tons: float | None = None
+    required_pressure_bar: float | None = None
+    required_temperature_c: float | None = None
     top_n: int = Field(default=5, ge=1, le=100)
 
     @field_validator(
@@ -62,6 +64,7 @@ class FindQuery(_BaseRequestModel):
         "kv",
         "capacity_kw",
         "capacity_tons",
+        "required_pressure_bar",
     )
     @classmethod
     def _non_negative(cls, value: float | None, info: ValidationInfo) -> float | None:

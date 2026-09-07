@@ -39,6 +39,10 @@ class EquipmentService:
                 "valve": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "cv_or_kv"],
                 "strainer": ["size_mm", "connection_size_mm_or_inch", "kv_or_cv"],
                 "quick_disconnect": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "cv_or_kv"],
+            },
+            "duty_limits": {
+                "required_pressure_bar": "excludes parts whose published pressure rating is below this",
+                "required_temperature_c": "excludes parts whose published maximum temperature is below this",
                 "filter_dryer": ["size_mm", "connection_size_mm_or_inch", "capacity_kw_or_tons"],
                 "cdu": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "capacity_kw_or_tons"],
                 "chiller": ["size_mm", "connection_size_mm_or_inch", "component_subtype", "capacity_kw_or_tons"],
@@ -84,6 +88,8 @@ class EquipmentService:
         capacity_tons: float | None = None,
         connection_size_mm: float | None = None,
         connection_size_inch: float | None = None,
+        required_pressure_bar: float | None = None,
+        required_temperature_c: float | None = None,
         top_n: int = 5,
     ) -> list[dict[str, Any]]:
         matches = find_closest_components(
@@ -98,9 +104,14 @@ class EquipmentService:
             target_capacity_tons=capacity_tons,
             target_connection_size_mm=connection_size_mm,
             target_connection_size_inch=connection_size_inch,
+            required_pressure_bar=required_pressure_bar,
+            required_temperature_c=required_temperature_c,
             top_n=top_n,
         )
-        return [{"score": m.score, "component": asdict(m.component)} for m in matches]
+        return [
+            {"score": m.score, "component": asdict(m.component), "warnings": list(m.warnings)}
+            for m in matches
+        ]
 
     def compatibility(
         self,
