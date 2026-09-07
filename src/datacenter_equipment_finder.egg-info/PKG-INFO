@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: datacenter-equipment-finder
+Version: 0.1.0
+Summary: Find closest data-center cooling components by required size/capacity and compatibility.
+Author: RGoharimehr
+License: MIT
+Keywords: datacenter,cooling,cdu,chiller,cv,kv
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
 # DATA-CENTER-EQUIPMENT-FINDER
 
 An installable Python package is included to find data-center cooling components by closest required size, Cv/Kv, and capacity, then check list compatibility.

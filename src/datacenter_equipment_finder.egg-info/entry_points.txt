@@ -1,0 +1,2 @@
+[console_scripts]
+dcef = datacenter_equipment_finder.cli:main
