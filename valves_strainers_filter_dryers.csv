@@ -1,0 +1,10 @@
+brand,category,series_name,nominal_size_mm,nominal_size_inch,flow_coefficient_type,flow_coefficient_value,capacity_tons,capacity_kw,connection_type,body_style,pressure_rating_bar,part_number_base,source_catalog,source_page,datasheet_url
+Parker,valve,A4A,20,3/4,Cv,4.4,,,FPT,angle,40,A4A-20,CC-11c/US,xx,https://shabbirbrothers.com/wp-content/uploads/2023/11/parker_products_19.pdf
+Parker,valve,S4A,20,3/4,Cv,8.1,,,SW,straight,40,S4A-20,CC-11c/US,xx,https://shabbirbrothers.com/wp-content/uploads/2023/11/parker_products_19.pdf
+Parker,valve,CK2,32,1-1/4,Cv,19.0,,,SW,straight,40,CK2-32,CC-11c/US,xx,https://shabbirbrothers.com/wp-content/uploads/2023/11/parker_products_19.pdf
+Danfoss,strainer,FIA,20,3/4,Kv,6.5,,,DIN BW,straight,52,FIA-20,AF234986442411en,xx,https://www.danfoss.com/en/products/dcs/valves/line-components/strainers/
+Danfoss,strainer,FIA,25,1,Kv,9.2,,,ANSI Sch 40,angle,52,FIA-25,AF234986442411en,xx,https://www.danfoss.com/en/products/dcs/valves/line-components/strainers/
+Parker,filter_dryer,LLD,20,3/4,,,2.5,8.8,ODF,straight,45,LLD-20,A-1c,xx,https://www.parker.com/literature/Sporlan/Sporlan%20pdf%20files/Sporlan%20Catalogs%20Section%20A/A-1c.pdf
+Parker,filter_dryer,BF,20,3/4,,,3.0,10.6,ODF,straight,45,BF-20,A-1c,xx,https://www.parker.com/literature/Sporlan/Sporlan%20pdf%20files/Sporlan%20Catalogs%20Section%20A/A-1c.pdf
+Danfoss,filter_dryer,DCR,20,3/4,,,2.4,8.4,ODS,straight,46,DCR-20,DCR-DML,xx,https://www.danfoss.com/en/products/dcs/filter-driers/hermetic-filter-driers/
+Danfoss,filter_dryer,DML,20,3/4,,,2.2,7.7,ODS,straight,46,DML-20,DCR-DML,xx,https://www.danfoss.com/en/products/dcs/filter-driers/hermetic-filter-driers/
