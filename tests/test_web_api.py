@@ -2,17 +2,18 @@ import json
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from datacenter_equipment_finder.service import EquipmentService
-from datacenter_equipment_finder.web import create_handler
+from datacenter_equipment_finder.web import API_PREFIX, ServerConfig, create_handler
 
 
 class WebApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         service = EquipmentService.default()
-        handler = create_handler(service)
+        handler = create_handler(service, config=ServerConfig(api_key=None, rate_limit_per_minute=200))
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         cls.port = cls.server.server_port
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -29,14 +30,16 @@ class WebApiTests(unittest.TestCase):
             return json.loads(resp.read().decode("utf-8"))
 
     def test_schema_endpoint(self):
-        payload = self._get_json("/api/schema")
-        self.assertIn("fields", payload)
-        self.assertIn("categories", payload)
-        self.assertIn("brands", payload)
+        payload = self._get_json(f"{API_PREFIX}/schema")
+        self.assertTrue(payload["ok"])
+        self.assertIn("fields", payload["data"])
+        self.assertIn("categories", payload["data"])
+        self.assertIn("brands", payload["data"])
 
     def test_find_endpoint(self):
-        payload = self._get_json("/api/find?category=valve&size_mm=20&cv=7&top_n=1")
-        self.assertEqual(payload[0]["component"]["part_number"], "S4A-20")
+        payload = self._get_json(f"{API_PREFIX}/find?category=valve&size_mm=20&cv=7&top_n=1")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"][0]["component"]["part_number"], "S4A-20")
 
     def test_compat_endpoint(self):
         body = json.dumps(
@@ -46,15 +49,77 @@ class WebApiTests(unittest.TestCase):
             }
         ).encode("utf-8")
         req = Request(
-            f"http://127.0.0.1:{self.port}/api/compat",
+            f"http://127.0.0.1:{self.port}{API_PREFIX}/compat",
             method="POST",
             data=body,
             headers={"Content-Type": "application/json"},
         )
         with urlopen(req) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-        self.assertFalse(payload["is_compatible"])
-        self.assertGreaterEqual(payload["selected_count"], 2)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["data"]["is_compatible"])
+        self.assertGreaterEqual(payload["data"]["selected_count"], 2)
+
+    def test_legacy_route_still_works(self):
+        payload = self._get_json("/api/find?category=valve&size_mm=20&cv=7&top_n=1")
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["data"][0]["component"]["part_number"], "S4A-20")
+
+    def test_invalid_find_request_fails(self):
+        with self.assertRaises(HTTPError) as ctx:
+            self._get_json(f"{API_PREFIX}/find?cv=1&kv=1")
+        self.assertEqual(ctx.exception.code, 400)
+
+
+class WebApiAuthAndRateLimitTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        service = EquipmentService.default()
+        handler = create_handler(service, config=ServerConfig(api_key="token123", rate_limit_per_minute=100))
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        cls.port = cls.server.server_port
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=2)
+
+    def _get(self, path: str, headers: dict[str, str] | None = None):
+        req = Request(f"http://127.0.0.1:{self.port}{path}", headers=headers or {})
+        with urlopen(req) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def test_requires_api_key(self):
+        with self.assertRaises(HTTPError) as ctx:
+            self._get(f"{API_PREFIX}/schema")
+        self.assertEqual(ctx.exception.code, 401)
+
+    def test_allows_with_api_key(self):
+        payload = self._get(f"{API_PREFIX}/schema", {"X-API-Key": "token123"})
+        self.assertTrue(payload["ok"])
+
+    def test_rate_limit(self):
+        service = EquipmentService.default()
+        handler = create_handler(service, config=ServerConfig(api_key=None, rate_limit_per_minute=2))
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_port
+            with urlopen(f"http://127.0.0.1:{port}{API_PREFIX}/health"):
+                pass
+            with urlopen(f"http://127.0.0.1:{port}{API_PREFIX}/health"):
+                pass
+            with self.assertRaises(HTTPError) as ctx:
+                urlopen(f"http://127.0.0.1:{port}{API_PREFIX}/health")
+            self.assertEqual(ctx.exception.code, 429)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

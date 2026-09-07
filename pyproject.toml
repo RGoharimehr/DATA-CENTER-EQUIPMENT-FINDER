@@ -28,4 +28,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-datacenter_equipment_finder = ["data/*.csv"]
+datacenter_equipment_finder = ["data/*.csv", "data/vendors/*.csv"]

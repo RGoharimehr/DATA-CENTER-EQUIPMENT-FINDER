@@ -4,6 +4,7 @@ import argparse
 
 from .catalog import EquipmentCatalog
 from .compatibility import check_compatibility
+from .dataset_pipeline import build_catalog_from_vendor_sources
 from .explanations import explain_category, explain_property
 from .matching import find_closest_components
 from .web import run_server
@@ -35,6 +36,12 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve", help="Run web interface and JSON API")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
+    s.add_argument("--api-key", default=None, help="Optional API key required on X-API-Key header")
+    s.add_argument("--rate-limit-per-minute", type=int, default=None, help="Per-client requests/minute for API")
+
+    b = sub.add_parser("build-catalog", help="Build packaged catalog from vendor CSV sources")
+    b.add_argument("--source-dir", default="src/datacenter_equipment_finder/data/vendors")
+    b.add_argument("--output-file", default="src/datacenter_equipment_finder/data/equipment_catalog.csv")
 
     return parser
 
@@ -89,7 +96,22 @@ def main() -> int:
         return 0
 
     if args.command == "serve":
-        run_server(host=args.host, port=args.port)
+        run_server(
+            host=args.host,
+            port=args.port,
+            api_key=args.api_key,
+            rate_limit_per_minute=args.rate_limit_per_minute,
+        )
+        return 0
+
+    if args.command == "build-catalog":
+        errors = build_catalog_from_vendor_sources(args.source_dir, args.output_file)
+        if errors:
+            print("Catalog validation failed:")
+            for err in errors:
+                print(f"- {err}")
+            return 2
+        print(f"Catalog built: {args.output_file}")
         return 0
 
     return 1

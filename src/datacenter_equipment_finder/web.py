@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .service import EquipmentService
+
+API_VERSION = "v1"
+API_PREFIX = f"/api/{API_VERSION}"
+LEGACY_PREFIX = "/api"
 
 
 HTML_INDEX = """<!doctype html>
@@ -14,14 +23,16 @@ HTML_INDEX = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Data Center Equipment Finder</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; }
-    input, select, button { margin: 0.25rem; padding: 0.35rem; }
-    pre { background: #f4f4f4; padding: 1rem; overflow: auto; }
+    body { font-family: Arial, sans-serif; margin: 2rem; max-width: 1080px; }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    input, select, button { padding: 0.4rem; }
+    pre { background: #f4f4f4; padding: 1rem; overflow: auto; border-radius: 6px; }
   </style>
 </head>
 <body>
   <h1>Data Center Equipment Finder</h1>
-  <div>
+  <p>API version: <code>v1</code></p>
+  <div class="row">
     <label>Category <input id="category" placeholder="valve/cdu/chiller"></label>
     <label>Brand <input id="brand" placeholder="Parker/Vertiv"></label>
     <label>Size (mm) <input id="size" type="number" step="any"></label>
@@ -44,7 +55,7 @@ HTML_INDEX = """<!doctype html>
         capacity_kw: document.getElementById('capkw').value,
         top_n: document.getElementById('topn').value
       });
-      const res = await fetch('/api/find?' + params.toString());
+      const res = await fetch('/api/v1/find?' + params.toString());
       const data = await res.json();
       document.getElementById('out').textContent = JSON.stringify(data, null, 2);
     }
@@ -52,6 +63,34 @@ HTML_INDEX = """<!doctype html>
 </body>
 </html>
 """
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    api_key: str | None = None
+    rate_limit_per_minute: int = 120
+
+
+def _default_config() -> ServerConfig:
+    configured_key = os.environ.get("DCEF_API_KEY")
+    configured_limit = int(os.environ.get("DCEF_RATE_LIMIT_PER_MIN", "120"))
+    return ServerConfig(api_key=configured_key, rate_limit_per_minute=max(1, configured_limit))
+
+
+def _envelope_ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = {"ok": True, "data": data, "error": None, "meta": {"api_version": API_VERSION}}
+    if meta:
+        payload["meta"].update(meta)
+    return payload
+
+
+def _envelope_error(code: str, message: str, details: Any = None) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "data": None,
+        "error": {"code": code, "message": message, "details": details},
+        "meta": {"api_version": API_VERSION},
+    }
 
 
 def _first(query: dict[str, list[str]], key: str) -> str | None:
@@ -69,11 +108,30 @@ def _to_float(query: dict[str, list[str]], key: str) -> float | None:
     return float(value)
 
 
+def _to_int(query: dict[str, list[str]], key: str, default: int) -> int:
+    value = _first(query, key)
+    if value is None:
+        return default
+    return int(value)
+
+
+def _normalized_api_path(path: str) -> str:
+    if path.startswith(API_PREFIX):
+        return path
+    if path == LEGACY_PREFIX:
+        return API_PREFIX
+    if path.startswith(LEGACY_PREFIX + "/"):
+        return API_PREFIX + path[len(LEGACY_PREFIX) :]
+    return path
+
+
 def _json_response(handler: BaseHTTPRequestHandler, payload: dict | list, status: int = 200) -> None:
     body = json.dumps(payload).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -88,101 +146,203 @@ def _text_response(handler: BaseHTTPRequestHandler, text: str, status: int = 200
     handler.wfile.write(body)
 
 
-def create_handler(service: EquipmentService):
+def _validate_find_inputs(query: dict[str, list[str]]) -> tuple[bool, str | None]:
+    try:
+        top_n = _to_int(query, "top_n", 5)
+        if top_n < 1 or top_n > 100:
+            return False, "top_n must be between 1 and 100"
+        for key in ("size_mm", "cv", "kv", "capacity_kw", "capacity_tons"):
+            value = _to_float(query, key)
+            if value is not None and value < 0:
+                return False, f"{key} must be non-negative"
+        if _to_float(query, "cv") is not None and _to_float(query, "kv") is not None:
+            return False, "Provide either cv or kv, not both"
+    except ValueError as exc:
+        return False, f"Invalid numeric value: {exc}"
+    return True, None
+
+
+def create_handler(service: EquipmentService, config: ServerConfig | None = None):
+    cfg = config or _default_config()
+    request_buckets: dict[str, deque[float]] = defaultdict(deque)
+
     class EquipmentHandler(BaseHTTPRequestHandler):
+        def _client_id(self) -> str:
+            forwarded = self.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            return self.client_address[0]
+
+        def _check_rate_limit(self) -> bool:
+            now = time.time()
+            window_start = now - 60
+            bucket = request_buckets[self._client_id()]
+            while bucket and bucket[0] < window_start:
+                bucket.popleft()
+            if len(bucket) >= cfg.rate_limit_per_minute:
+                _json_response(
+                    self,
+                    _envelope_error("rate_limited", "Rate limit exceeded", {"limit_per_minute": cfg.rate_limit_per_minute}),
+                    429,
+                )
+                return False
+            bucket.append(now)
+            return True
+
+        def _check_auth(self, path: str) -> bool:
+            if not path.startswith(API_PREFIX):
+                return True
+            if path.endswith("/health"):
+                return True
+            if not cfg.api_key:
+                return True
+            supplied = self.headers.get("X-API-Key")
+            if supplied == cfg.api_key:
+                return True
+            _json_response(self, _envelope_error("unauthorized", "Missing or invalid API key"), 401)
+            return False
+
         def do_OPTIONS(self) -> None:  # noqa: N802
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
             self.end_headers()
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            path = _normalized_api_path(parsed.path)
             query = parse_qs(parsed.query)
 
-            if parsed.path == "/":
+            if path == "/":
                 _text_response(self, HTML_INDEX, 200)
                 return
 
-            if parsed.path == "/api/health":
-                _json_response(self, {"status": "ok"}, 200)
+            if not self._check_auth(path):
+                return
+            if path.startswith(API_PREFIX) and not self._check_rate_limit():
                 return
 
-            if parsed.path == "/api/schema":
-                _json_response(self, service.schema(), 200)
+            if path == f"{API_PREFIX}/health":
+                _json_response(self, _envelope_ok({"status": "ok"}), 200)
                 return
 
-            if parsed.path == "/api/components":
+            if path == f"{API_PREFIX}/schema":
+                _json_response(self, _envelope_ok(service.schema()), 200)
+                return
+
+            if path == f"{API_PREFIX}/components":
                 try:
+                    limit = _to_int(query, "limit", 100)
+                    offset = _to_int(query, "offset", 0)
+                    if limit < 1 or limit > 1000:
+                        raise ValueError("limit must be between 1 and 1000")
+                    if offset < 0:
+                        raise ValueError("offset must be >= 0")
                     payload = service.list_components(
                         category=_first(query, "category"),
                         brand=_first(query, "brand"),
-                        limit=int(_first(query, "limit") or "100"),
-                        offset=int(_first(query, "offset") or "0"),
+                        limit=limit,
+                        offset=offset,
                     )
-                    _json_response(self, payload, 200)
+                    _json_response(self, _envelope_ok(payload, {"count": len(payload)}), 200)
                     return
                 except ValueError as exc:
-                    _json_response(self, {"error": str(exc)}, 400)
+                    _json_response(self, _envelope_error("invalid_request", str(exc)), 400)
                     return
 
-            if parsed.path == "/api/component":
+            if path == f"{API_PREFIX}/component":
                 part = _first(query, "part_number")
                 if not part:
-                    _json_response(self, {"error": "part_number is required"}, 400)
+                    _json_response(self, _envelope_error("invalid_request", "part_number is required"), 400)
                     return
                 item = service.get_component(part)
                 if item is None:
-                    _json_response(self, {"error": "component not found"}, 404)
+                    _json_response(self, _envelope_error("not_found", "component not found"), 404)
                     return
-                _json_response(self, item, 200)
+                _json_response(self, _envelope_ok(item), 200)
                 return
 
-            if parsed.path == "/api/find":
-                try:
-                    payload = service.find_components(
-                        category=_first(query, "category"),
-                        brand=_first(query, "brand"),
-                        size_mm=_to_float(query, "size_mm"),
-                        cv=_to_float(query, "cv"),
-                        kv=_to_float(query, "kv"),
-                        capacity_kw=_to_float(query, "capacity_kw"),
-                        capacity_tons=_to_float(query, "capacity_tons"),
-                        top_n=int(_first(query, "top_n") or "5"),
-                    )
-                    _json_response(self, payload, 200)
+            if path == f"{API_PREFIX}/find":
+                ok, err = _validate_find_inputs(query)
+                if not ok:
+                    _json_response(self, _envelope_error("invalid_request", err or "invalid find inputs"), 400)
                     return
-                except ValueError as exc:
-                    _json_response(self, {"error": str(exc)}, 400)
-                    return
+                payload = service.find_components(
+                    category=_first(query, "category"),
+                    brand=_first(query, "brand"),
+                    size_mm=_to_float(query, "size_mm"),
+                    cv=_to_float(query, "cv"),
+                    kv=_to_float(query, "kv"),
+                    capacity_kw=_to_float(query, "capacity_kw"),
+                    capacity_tons=_to_float(query, "capacity_tons"),
+                    top_n=_to_int(query, "top_n", 5),
+                )
+                _json_response(self, _envelope_ok(payload, {"count": len(payload)}), 200)
+                return
 
-            if parsed.path == "/api/explain":
+            if path == f"{API_PREFIX}/explain":
                 payload = service.explain(
                     property_name=_first(query, "property"),
                     category=_first(query, "category"),
                 )
-                _json_response(self, payload, 200)
+                _json_response(self, _envelope_ok(payload), 200)
                 return
 
-            _json_response(self, {"error": "not found"}, 404)
+            if path == f"{API_PREFIX}/openapi.json":
+                spec = {
+                    "openapi": "3.0.0",
+                    "info": {"title": "DCEF API", "version": API_VERSION},
+                    "paths": {
+                        f"{API_PREFIX}/health": {"get": {}},
+                        f"{API_PREFIX}/schema": {"get": {}},
+                        f"{API_PREFIX}/components": {"get": {}},
+                        f"{API_PREFIX}/component": {"get": {}},
+                        f"{API_PREFIX}/find": {"get": {}},
+                        f"{API_PREFIX}/compat": {"post": {}},
+                        f"{API_PREFIX}/explain": {"get": {}},
+                    },
+                }
+                _json_response(self, _envelope_ok(spec), 200)
+                return
+
+            _json_response(self, _envelope_error("not_found", "not found"), 404)
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            if parsed.path != "/api/compat":
-                _json_response(self, {"error": "not found"}, 404)
+            path = _normalized_api_path(parsed.path)
+
+            if not self._check_auth(path):
+                return
+            if path.startswith(API_PREFIX) and not self._check_rate_limit():
+                return
+
+            if path != f"{API_PREFIX}/compat":
+                _json_response(self, _envelope_error("not_found", "not found"), 404)
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length) or b"{}")
+                part_numbers = payload.get("part_numbers", [])
+                if not isinstance(part_numbers, list) or not all(isinstance(p, str) for p in part_numbers):
+                    raise ValueError("part_numbers must be a list of strings")
+                max_connection_time = payload.get("max_connection_time")
+                if max_connection_time is not None:
+                    max_connection_time = float(max_connection_time)
+                    if max_connection_time < 0:
+                        raise ValueError("max_connection_time must be non-negative")
+                required_material = payload.get("required_material")
+                if required_material is not None and not isinstance(required_material, str):
+                    raise ValueError("required_material must be a string")
+
                 report = service.compatibility(
-                    payload.get("part_numbers", []),
-                    max_connection_time=payload.get("max_connection_time"),
-                    required_material=payload.get("required_material"),
+                    part_numbers,
+                    max_connection_time=max_connection_time,
+                    required_material=required_material,
                 )
-                _json_response(self, report, 200)
-            except (json.JSONDecodeError, ValueError) as exc:
-                _json_response(self, {"error": str(exc)}, 400)
+                _json_response(self, _envelope_ok(report), 200)
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                _json_response(self, _envelope_error("invalid_request", str(exc)), 400)
 
         def log_message(self, format: str, *args):  # noqa: A003
             return
@@ -190,11 +350,15 @@ def create_handler(service: EquipmentService):
     return EquipmentHandler
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
-    service = EquipmentService.default()
-    server = ThreadingHTTPServer((host, port), create_handler(service))
+def run_server(host: str = "127.0.0.1", port: int = 8000, *, api_key: str | None = None, rate_limit_per_minute: int | None = None) -> None:
+    base_cfg = _default_config()
+    config = ServerConfig(
+        api_key=api_key if api_key is not None else base_cfg.api_key,
+        rate_limit_per_minute=rate_limit_per_minute if rate_limit_per_minute is not None else base_cfg.rate_limit_per_minute,
+    )
+    server = ThreadingHTTPServer((host, port), create_handler(EquipmentService.default(), config=config))
     print(f"DCEF web server running on http://{host}:{port}")
-    print("Endpoints: /api/schema, /api/components, /api/find, /api/compat, /api/explain")
+    print(f"API: {API_PREFIX} | OpenAPI: {API_PREFIX}/openapi.json")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
