@@ -564,7 +564,16 @@ Lower is better.
 - `src/datacenter_equipment_finder/data/equipment_catalog.csv`
 - `src/datacenter_equipment_finder/data/equipment_catalog.sqlite`
 
-### Verification status
+### Continuous integration
+
+`.github/workflows/ci.yml` runs the suite, ruff and mypy on Python 3.11, 3.12 and
+3.13 for every push and pull request. A second job installs the package with
+`--no-deps` and asserts the selection core imports and runs a reconciliation with
+rapidfuzz, pypdf and pydantic absent, then asserts those packages really are
+missing - a job that quietly installs them proves nothing. That guarantee is what
+lets the core load in a Pyodide worker beside a browser-hosted design engine.
+
+## Verification status
 
 Every row carries a `verification_status`:
 

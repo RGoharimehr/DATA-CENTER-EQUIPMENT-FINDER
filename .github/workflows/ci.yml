@@ -1,0 +1,91 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor pyproject declares; rapidfuzz needs it. Running the floor
+        # and the newest supported release catches a dependency that quietly drops one.
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Types
+        run: mypy
+
+  core-without-optional-dependencies:
+    # The selection core has to import with nothing but the standard library: it runs
+    # in a Pyodide worker beside a browser-hosted design engine, where rapidfuzz and
+    # pypdf are not available. Installing them in the test job hides a regression here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install without extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-deps -e .
+
+      - name: Import the core and run a selection
+        run: |
+          python - <<'PY'
+          from datacenter_equipment_finder.service import EquipmentService
+          from datacenter_equipment_finder.rd_studio import duties_from_sizing, reconcile
+
+          service = EquipmentService.default()
+          rows = len(service.catalog.components)
+          assert rows > 0, "catalogue failed to load"
+
+          duties = duties_from_sizing(
+              [{"component_id": "BV-1", "Cv_US": 20.0, "allocated_dp_Pa": 20000}],
+              [{"tag": "BV-1", "type": "balancing_valve", "service": "TCS",
+                "material": "stainless_sch10", "size_nominal_in": "2"}],
+          )
+          report = reconcile(duties, service.select_for_duty(duties))
+          assert report["rows"], "reconcile produced no rows"
+          print(f"core ok: {rows} catalogue rows, {len(report['rows'])} reconciled")
+          PY
+
+      - name: Confirm the optional dependencies really are absent
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          for name in ("rapidfuzz", "pypdf", "pydantic"):
+              assert importlib.util.find_spec(name) is None, (
+                  f"{name} is installed; this job is not testing what it claims to"
+              )
+          print("rapidfuzz, pypdf and pydantic are absent as intended")
+          PY
