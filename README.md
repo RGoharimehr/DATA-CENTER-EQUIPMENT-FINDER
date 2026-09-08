@@ -260,6 +260,11 @@ dcef build-db-from-pdf path/to/vendor-datasheet.pdf \
   --db-path vendor_catalog.sqlite --csv-path vendor_catalog.csv
 ```
 
+Extraction keeps the rows it can use and sets the rest aside. Anything rejected is
+written to `<csv-path>.rejected.json` with the reason, so a bad row can be corrected
+rather than re-run blind. Pass `--strict` to fail the whole run instead. The command
+fails only when no row survives.
+
 Rows produced this way are always written with `verification_status = unverified`,
 whatever the model claims. A model reading PDF text is making an extraction, not a
 checked transcription, and this command does not confirm anything against the

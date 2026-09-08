@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,11 @@ def _pdf_prompt(text_chunk: str) -> str:
         "Return JSON only. Use the exact schema keys below for every row.\n"
         "Only include rows that represent actual equipment items.\n"
         "Every field value must be a string; use an empty string when unknown.\n"
+        "part_number is required. Use the manufacturer's ordering code or SKU when the "
+        "document prints one. When it does not - common for CDUs and chillers - use the "
+        "vendor's product designation exactly as printed, for example "
+        "'10U Coolant Distribution Unit'. Never invent a code.\n"
+        "Do not guess numeric values. Leave a field empty rather than estimating it.\n"
         f"Schema keys: {FIELD_NAMES}\n"
         'Return an object like {"rows": [...]}.\n'
         f"PDF text:\n{text_chunk}"
@@ -213,12 +219,38 @@ def extract_catalog_rows_from_pdf(
     for chunk in chunks:
         payload = _request_local_model(_pdf_prompt(chunk), cfg)
         rows.extend(_rows_from_payload(payload))
-    rows = _merge_rows(rows)
-    errors = validate_rows(rows)
-    if errors:
-        message = "\n".join(f"- {error}" for error in errors[:20])
-        raise ValueError(f"Extracted PDF rows failed validation:\n{message}")
-    return rows
+    return _merge_rows(rows)
+
+
+def _partition_rows(rows: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+    """Split an extraction into rows that pass validation and rows that do not.
+
+    Extraction is a draft-producing step. Discarding a whole document because one row
+    is unusable loses the good rows and shows the user nothing to correct.
+    """
+    accepted: list[dict[str, str]] = []
+    rejected: list[dict[str, Any]] = []
+    for row in rows:
+        problems = validate_rows([row])
+        if problems:
+            reasons = [re.sub(r"^row \d+: ", "", problem) for problem in problems]
+            rejected.append({"row": row, "reasons": reasons})
+        else:
+            accepted.append(row)
+    # Re-check the accepted set as a whole to catch duplicates between rows.
+    duplicate_errors = validate_rows(accepted)
+    if duplicate_errors:
+        seen: set[str] = set()
+        deduped: list[dict[str, str]] = []
+        for row in accepted:
+            key = row.get("part_number", "").strip().lower()
+            if key in seen:
+                rejected.append({"row": row, "reasons": [f"duplicate part_number {row.get('part_number')}"]})
+                continue
+            seen.add(key)
+            deduped.append(row)
+        accepted = deduped
+    return accepted, rejected
 
 
 def write_catalog_csv(rows: list[dict[str, str]], csv_path: str | Path) -> Path:
@@ -239,13 +271,27 @@ def build_database_from_pdf(
     config: AssistantConfig | None = None,
     max_pages: int | None = None,
     max_chars_per_chunk: int = 12000,
+    strict: bool = False,
 ) -> dict[str, Any]:
-    rows = extract_catalog_rows_from_pdf(
+    extracted = extract_catalog_rows_from_pdf(
         pdf_path,
         config=config,
         max_pages=max_pages,
         max_chars_per_chunk=max_chars_per_chunk,
     )
+    rows, rejected = _partition_rows(extracted)
+
+    if strict and rejected:
+        detail = "\n".join(
+            f"- {'; '.join(item['reasons'])}" for item in rejected[:20]
+        )
+        raise ValueError(f"Extracted PDF rows failed validation:\n{detail}")
+    if not rows:
+        detail = "\n".join(f"- {'; '.join(item['reasons'])}" for item in rejected[:20])
+        raise ValueError(
+            f"No usable rows were extracted from {Path(pdf_path)}."
+            + (f" Rejected {len(rejected)}:\n{detail}" if rejected else "")
+        )
 
     temp_csv: Path | None = None
     target_csv: Path
@@ -259,10 +305,19 @@ def build_database_from_pdf(
     write_catalog_csv(rows, target_csv)
     row_count = build_sqlite_database(target_csv, sqlite_path)
 
+    rejected_path: Path | None = None
+    if rejected:
+        # Keep what the model produced so the user can correct it rather than
+        # re-running the extraction blind.
+        rejected_path = target_csv.with_suffix(".rejected.json")
+        rejected_path.write_text(json.dumps(rejected, indent=2), encoding="utf-8")
+
     return {
         "pdf_path": str(Path(pdf_path)),
         "csv_path": str(target_csv),
         "sqlite_path": str(Path(sqlite_path)),
         "rows": row_count,
+        "rejected": len(rejected),
+        "rejected_path": str(rejected_path) if rejected_path else None,
         "used_temporary_csv": temp_csv is not None,
     }

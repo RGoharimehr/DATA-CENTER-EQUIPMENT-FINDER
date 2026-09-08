@@ -82,6 +82,8 @@ def _build_parser() -> argparse.ArgumentParser:
     pdf.add_argument("--db-path", required=True)
     pdf.add_argument("--csv-path", default=None)
     pdf.add_argument("--max-pages", type=int, default=None)
+    pdf.add_argument("--strict", action="store_true",
+                     help="Fail if any extracted row is unusable, instead of keeping the good ones")
 
     return parser
 
@@ -226,6 +228,7 @@ def main() -> int:
                 args.db_path,
                 csv_path=args.csv_path,
                 max_pages=args.max_pages,
+                strict=args.strict,
             )
         except (FileNotFoundError, ValueError) as exc:
             print(f"build-db-from-pdf failed: {exc}")
@@ -234,6 +237,12 @@ def main() -> int:
             f"Extracted {summary['rows']} rows from {summary['pdf_path']}\n"
             f"  csv:    {summary['csv_path']}\n"
             f"  sqlite: {summary['sqlite_path']}\n"
+            + (
+                f"  {summary['rejected']} row(s) rejected, written to "
+                f"{summary['rejected_path']}\n"
+                if summary["rejected"]
+                else ""
+            ) +
             "Rows are marked unverified: a model extraction is not a checked "
             "transcription. Confirm them against the datasheet before use."
         )

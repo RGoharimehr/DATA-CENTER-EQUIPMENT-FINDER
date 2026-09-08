@@ -106,3 +106,68 @@ def test_missing_model_configuration_explains_what_to_set(tmp_path: Path) -> Non
     pdf = write_text_pdf(tmp_path / "vendor.pdf", ["text"])
     with pytest.raises(ValueError, match="DCEF_LOCAL_AI_ENDPOINT"):
         extract_catalog_rows_from_pdf(pdf, config=AssistantConfig())
+
+
+GOOD = dict(ROW, part_number="RTAC 155-TEST")
+NAMELESS = dict(ROW, part_number="", component_name="10U Coolant Distribution Unit")
+
+
+class _MixedModel(_StubModel):
+    def do_POST(self) -> None:  # noqa: N802
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        body = json.dumps({"response": json.dumps({"rows": [GOOD, NAMELESS]})}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture()
+def mixed_model():
+    server = HTTPServer(("127.0.0.1", 0), _MixedModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}/api/generate"
+    server.shutdown()
+    server.server_close()
+
+
+def test_one_unusable_row_does_not_discard_the_extraction(tmp_path: Path, mixed_model: str) -> None:
+    # The Boyd 10U datasheet publishes no SKU at all, so a row without a part_number is
+    # a normal outcome. Losing the whole document over it wastes the run.
+    summary = build_database_from_pdf(
+        write_text_pdf(tmp_path / "v.pdf", ["catalog"]),
+        tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv",
+        config=AssistantConfig(local_endpoint=mixed_model, local_model="stub"),
+    )
+    assert summary["rows"] == 1
+    assert summary["rejected"] == 1
+
+
+def test_rejected_rows_are_written_out_for_inspection(tmp_path: Path, mixed_model: str) -> None:
+    summary = build_database_from_pdf(
+        write_text_pdf(tmp_path / "v.pdf", ["catalog"]),
+        tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv",
+        config=AssistantConfig(local_endpoint=mixed_model, local_model="stub"),
+    )
+    rejected = json.loads(Path(summary["rejected_path"]).read_text())
+    assert rejected[0]["reasons"] == ["missing part_number"]
+    assert rejected[0]["row"]["component_name"] == "10U Coolant Distribution Unit"
+
+
+def test_strict_mode_still_fails_the_whole_run(tmp_path: Path, mixed_model: str) -> None:
+    with pytest.raises(ValueError, match="failed validation"):
+        build_database_from_pdf(
+            write_text_pdf(tmp_path / "v.pdf", ["catalog"]),
+            tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv",
+            config=AssistantConfig(local_endpoint=mixed_model, local_model="stub"),
+            strict=True,
+        )
+
+
+def test_prompt_tells_the_model_what_to_do_without_a_sku() -> None:
+    from datacenter_equipment_finder.pdf_catalog import _pdf_prompt
+
+    prompt = _pdf_prompt("some catalog text")
+    assert "product designation" in prompt
+    assert "Never invent a code" in prompt
