@@ -377,6 +377,10 @@ Rules:
 - If nothing qualifies, the CLI says so and exits non-zero, and the assistant returns
   no matches plus an explicit check. It never quietly relaxes the limit.
 
+See `AGENT_INTEGRATION.md` for instructions aimed at an assistant embedded in a
+design generator: the call contract, what the tool refuses and why, and the claims
+a shortlist does not support.
+
 ## Reading a reference-design schedule
 
 ```bash
