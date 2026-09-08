@@ -16,7 +16,7 @@ from .dataset_pipeline import build_catalog_from_vendor_sources
 from .explanations import explain_category, explain_property
 from .matching import find_closest_components
 from .pdf_catalog import build_database_from_pdf
-from .rd_studio import duties_from_valve_schedule
+from .rd_studio import duties_from_sizing, duties_from_valve_schedule, reconcile
 from .service import EquipmentService
 from .web import run_server
 
@@ -61,6 +61,15 @@ def _build_parser() -> argparse.ArgumentParser:
     source.add_argument("--duty", help="Path to a duty spec, or - for stdin")
     source.add_argument("--schedule", help="Path to a reference-design valve schedule CSV")
     sel.add_argument("--top-n", type=int, default=3)
+
+    rec = sub.add_parser(
+        "reconcile",
+        help="Pair the generator's calculated duties with catalogue suggestions for review",
+    )
+    rec.add_argument("--sizing", required=True,
+                     help="Preliminary sizing JSON, or - for stdin; uses its valve_capacities")
+    rec.add_argument("--schedule", help="Valve schedule CSV, for loop, material and bore")
+    rec.add_argument("--top-n", type=int, default=3)
 
     sub.add_parser("schema", help="Show the categories, subtypes and brands available")
 
@@ -193,6 +202,29 @@ def main() -> int:
         selection = EquipmentService.default().select_for_duty(parsed_items, top_n=args.top_n)
         print(json.dumps(selection, indent=2))
         return 1 if selection["unresolved"] else 0
+
+    if args.command == "reconcile":
+        raw = sys.stdin.read() if args.sizing == "-" else Path(args.sizing).read_text(encoding="utf-8")
+        try:
+            sizing = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            print(f"reconcile failed: sizing JSON is not valid ({exc})")
+            return 2
+        capacities = sizing.get("valve_capacities") if isinstance(sizing, dict) else sizing
+        if not isinstance(capacities, list):
+            print("reconcile failed: expected a 'valve_capacities' list in the sizing JSON")
+            return 2
+
+        schedule_rows = None
+        if args.schedule:
+            with Path(args.schedule).open("r", encoding="utf-8", newline="") as handle:
+                schedule_rows = list(csv.DictReader(handle))
+
+        duties = duties_from_sizing(capacities, schedule_rows)
+        service = EquipmentService.default()
+        reconciliation = reconcile(duties, service.select_for_duty(duties, top_n=args.top_n))
+        print(json.dumps(reconciliation, indent=2))
+        return 1 if reconciliation["needs_external_sourcing"] else 0
 
     if args.command == "schema":
         schema = EquipmentService.default().schema()

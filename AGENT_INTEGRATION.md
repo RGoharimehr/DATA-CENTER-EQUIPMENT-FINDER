@@ -12,6 +12,53 @@ meet this duty?**
 
 It is not a hydraulic solver, not a vendor selection, and not a compliance check.
 
+## The review step, before publishing
+
+The generator sizes the network, then asks the catalogue what could meet each duty, and
+shows the engineer both. It does not choose.
+
+```bash
+dcef reconcile --sizing sizing.json --schedule valve_schedule.csv
+```
+
+`--sizing` takes the preliminary-sizing output and uses its `valve_capacities` entries
+(`component_id`, `Cv_US`, `Kv_m3_h`, `allocated_dp_Pa`, `flow_m3_s`). The schedule adds
+loop, wetted material and nominal bore for the same tag.
+
+One row per tag:
+
+```json
+{"tag": "TCS-R01K01-BV-001", "loop": "TCS", "schedule_type": "balancing_valve",
+ "calculated": {"required_cv_us": 18.5, "allocated_dp_pa": 20000, "minimum_size_mm": 50.8,
+                "required_material": "Copper"},
+ "suggested":  {"part_number": "HE Series 2 in", "flow_coefficient": 88.0,
+                "oversize": 1.88, "warnings": [...], "alternatives": [...]},
+ "decision": null,
+ "action_required": "choose"}
+```
+
+`decision` is null on purpose. Present `calculated` and `suggested` side by side and let
+the engineer pick per component: take the catalogue part, or keep the calculated
+requirement and source the part themselves. Do not preselect, and do not treat a
+suggestion as a decision.
+
+`action_required` is `choose` when there is a candidate and `source_externally` when
+there is none. `needs_external_sourcing` lists the second kind: those tags have no
+catalogue answer and the engineer must find a component from vendor literature.
+`ready_to_publish` stays false while `undecided` is non-empty.
+
+**A catalogue answer never removes the sourcing step.** Even a resolved row is a
+capacity shortlist. The engineer confirms it against the vendor's own documentation
+before the design is published.
+
+## Coefficients apply only where the generator computed one
+
+The generator computes a required Kv for **balancing and control valves** only. An
+isolation or check valve is on/off: its full-open Kv is not a design constraint, and it
+is selected on bore, pressure class and material. Those duties carry no `required_cv`
+and a `note` saying so. Never invent a coefficient requirement for an on/off valve, and
+never read a missing `required_cv` as missing data.
+
 ## Call it with a schedule
 
 ```bash

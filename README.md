@@ -12,6 +12,11 @@ This project provides:
 
 ## Requirements
 
+The selection core - catalogue, matching, compatibility, duty selection and the
+reference-design adapter - imports nothing outside the standard library, so it runs in a
+Pyodide worker beside a browser-hosted design engine. `rapidfuzz` (assistant) and
+`pypdf` (PDF ingestion) load on first use and are not needed to import the package.
+
 - Python 3.11+
 - `pip`
 - optional: `uv` for faster environment setup
@@ -380,6 +385,21 @@ Rules:
 See `AGENT_INTEGRATION.md` for instructions aimed at an assistant embedded in a
 design generator: the call contract, what the tool refuses and why, and the claims
 a shortlist does not support.
+
+## Review before publishing
+
+```bash
+dcef reconcile --sizing sizing.json --schedule valve_schedule.csv
+```
+
+Pairs what the generator calculated with what the catalogue offers, one row per tag,
+with the decision left unset. A design tool shows both columns and lets the engineer
+choose per component; `needs_external_sourcing` lists the tags with no catalogue answer,
+and `ready_to_publish` stays false until every row is decided.
+
+Required coefficients apply only to balancing and control valves. Isolation and check
+valves are on/off and are selected on bore, pressure class and material, so their duties
+carry no `required_cv`.
 
 ## Reading a reference-design schedule
 

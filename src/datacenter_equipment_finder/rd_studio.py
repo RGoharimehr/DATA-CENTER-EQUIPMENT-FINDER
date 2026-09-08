@@ -131,3 +131,143 @@ def duties_from_valve_schedule(path: str | Path) -> list[dict[str, Any]]:
 
     duties.sort(key=lambda d: (d["loop"] or "", d.get("schedule_type", ""), d.get("minimum_size_mm") or 0))
     return duties
+
+
+# The generator computes a required Kv only where one is meaningful. A balancing or
+# control valve is sized on its throttling coefficient at an allocated pressure drop;
+# an isolation or check valve is on/off, and its full-open Kv is not a design
+# constraint. Those are selected on bore, rating and material instead.
+THROTTLING_TYPES = {"balancing_valve", "control_valve"}
+
+
+def duties_from_sizing(
+    valve_capacities: list[dict[str, Any]],
+    schedule_rows: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Build duties from the generator's own preliminary-sizing output.
+
+    ``valve_capacities`` entries carry ``component_id``, ``Cv_US``, ``Kv_m3_h``,
+    ``allocated_dp_Pa`` and ``flow_m3_s``. The schedule, when supplied, adds the loop,
+    wetted material and nominal bore for the same tag.
+    """
+    context: dict[str, dict[str, str]] = {}
+    for row in schedule_rows or []:
+        tag = (row.get("tag") or row.get("component_id") or "").strip()
+        if tag:
+            context[tag] = row
+
+    duties: list[dict[str, Any]] = []
+    for entry in valve_capacities:
+        tag = str(entry.get("component_id") or entry.get("edge_id") or "").strip()
+        row = context.get(tag, {})
+        kind = (row.get("type") or "").strip()
+        category, subtype = TYPE_TO_CATEGORY.get(kind, ("valve", None))
+
+        duty: dict[str, Any] = {
+            "tag": tag,
+            "edge_id": entry.get("edge_id"),
+            "category": category,
+            "component_subtype": subtype,
+            "loop": (row.get("service") or "").strip() or None,
+            "required_material": MATERIAL_TO_FAMILY.get((row.get("material") or "").strip()),
+            "schedule_type": kind or None,
+            "required_cv": _number(str(entry.get("Cv_US"))) if entry.get("Cv_US") is not None else None,
+            "allocated_dp_pa": entry.get("allocated_dp_Pa"),
+            "design_flow_m3_s": entry.get("flow_m3_s"),
+        }
+
+        nominal = _number(row.get("size_nominal_in"))
+        if nominal is not None:
+            duty["minimum_size_mm"] = round(inch_to_mm(nominal), 2)
+
+        if kind and kind not in THROTTLING_TYPES:
+            # Keep the coefficient out of the requirement so an on/off valve is not
+            # judged against a throttling figure it was never sized for.
+            duty["required_cv"] = None
+            duty["sizing_note"] = (
+                f"{kind} is on/off; selected on bore, pressure class and material "
+                "rather than a required flow coefficient"
+            )
+
+        duties.append({k: v for k, v in duty.items() if v is not None})
+    return duties
+
+
+def reconcile(
+    duties: list[dict[str, Any]],
+    selection: dict[str, Any],
+) -> dict[str, Any]:
+    """Pair what the generator calculated with what the catalogue offers.
+
+    Produces one row per tag with the calculated duty beside the suggested part and an
+    unset decision. The design is not published until every row has one: the choice
+    between the calculated requirement and a catalogue part belongs to the engineer,
+    and a tag the catalogue cannot answer needs a component sourced elsewhere.
+    """
+    by_tag = {item.get("tag"): item for item in selection.get("items", [])}
+    rows: list[dict[str, Any]] = []
+
+    for duty in duties:
+        tag = duty.get("tag")
+        result = by_tag.get(tag, {})
+        candidates = result.get("candidates", [])
+        best = candidates[0] if candidates else None
+
+        calculated = {
+            "required_cv_us": duty.get("required_cv"),
+            "allocated_dp_pa": duty.get("allocated_dp_pa"),
+            "design_flow_m3_s": duty.get("design_flow_m3_s"),
+            "minimum_size_mm": duty.get("minimum_size_mm"),
+            "required_material": duty.get("required_material"),
+            "note": duty.get("sizing_note"),
+        }
+
+        suggested: dict[str, Any] | None = None
+        if best is not None:
+            component = best["component"]
+            suggested = {
+                "part_number": component["part_number"],
+                "brand": component["brand"],
+                "description": component["component_name"],
+                "flow_coefficient": component["flow_coefficient_value"],
+                "flow_coefficient_type": component["flow_coefficient_type"],
+                "nominal_size_mm": component["nominal_size_mm"],
+                "material": component["material"],
+                "pressure_rating_bar": component["pressure_rating_bar"],
+                "max_temperature_c": component["max_temperature_c"],
+                "datasheet_url": component["datasheet_url"],
+                "verification_status": component["verification_status"],
+                "oversize": best["score"],
+                "warnings": best.get("warnings", []),
+                "alternatives": [c["component"]["part_number"] for c in candidates[1:]],
+            }
+
+        rows.append(
+            {
+                "tag": tag,
+                "loop": duty.get("loop"),
+                "schedule_type": duty.get("schedule_type"),
+                "calculated": {k: v for k, v in calculated.items() if v is not None},
+                "suggested": suggested,
+                # Unset on purpose. The engineer picks per component.
+                "decision": None,
+                "action_required": (
+                    "choose" if suggested is not None else "source_externally"
+                ),
+                "unmet": result.get("unmet", []),
+            }
+        )
+
+    needs_sourcing = [r["tag"] for r in rows if r["action_required"] == "source_externally"]
+    return {
+        "rows": rows,
+        "needs_external_sourcing": needs_sourcing,
+        "undecided": [r["tag"] for r in rows if r["decision"] is None],
+        "ready_to_publish": False,
+        "note": (
+            "Every row needs a decision before the design is published. A suggested "
+            "part is a capacity shortlist, not a specification; a tag listed under "
+            "needs_external_sourcing has no catalogue answer and requires a component "
+            "sourced from vendor literature."
+        ),
+    }
