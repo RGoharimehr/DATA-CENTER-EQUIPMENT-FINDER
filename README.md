@@ -111,6 +111,16 @@ mypy
 
 ## Run locally
 
+### Discover what the catalog holds
+
+```bash
+dcef schema
+```
+
+Lists every category with its subtypes and the inputs that select it, the brands
+present, and the duty limits. An unknown `--category` or `--brand` is reported as a
+typo with the valid values, rather than as an empty result.
+
 ### CLI examples
 
 ```bash

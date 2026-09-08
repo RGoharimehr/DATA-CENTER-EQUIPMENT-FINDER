@@ -20,14 +20,9 @@
   <div class="card">
     <h3>Closest match search</h3>
     <div class="row">
-      <select id="category">
-        <option value="">category (any)</option>
-        <option value="valve">valve</option>
-        <option value="strainer">strainer</option>
-        <option value="filter_dryer">filter_dryer</option>
-        <option value="cdu">cdu</option>
-        <option value="chiller">chiller</option>
-      </select>
+      <!-- Populated from the catalog at load time. A hardcoded list went stale the
+           moment a category was added, hiding those rows from the published site. -->
+      <select id="category"><option value="">category (any)</option></select>
       <input id="subtype" placeholder="subtype (optional)" />
       <input id="brand" placeholder="brand (optional)" />
       <input id="size" type="number" step="any" placeholder="size mm" />
@@ -36,6 +31,8 @@
       <input id="cv" type="number" step="any" placeholder="cv (valve/strainer)" />
       <input id="kv" type="number" step="any" placeholder="kv (valve/strainer)" />
       <input id="cap" type="number" step="any" placeholder="capacity kW (CDU/chiller/filter_dryer)" />
+      <input id="reqBar" type="number" step="any" placeholder="system pressure bar" />
+      <input id="reqC" type="number" step="any" placeholder="coolant temp C" />
       <input id="topn" type="number" value="5" min="1" max="50" />
       <button id="find">Find</button>
     </div>

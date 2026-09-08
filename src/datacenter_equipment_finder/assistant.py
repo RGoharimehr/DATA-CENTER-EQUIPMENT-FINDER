@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from rapidfuzz import fuzz
 
+from .matching import FLOW_COEFFICIENT_CATEGORIES
 from .service import EquipmentService
 from .units import inch_to_mm
 
@@ -294,6 +295,16 @@ def _validate_local_filters(filters: dict[str, Any]) -> list[str]:
         filters["cv"] = None
         filters["kv"] = None
         checks.append("Cv/Kv inputs were ignored because they do not apply to CDU, chiller, or filter_dryer searches.")
+    if filters.get("category") in FLOW_COEFFICIENT_CATEGORIES and (
+        filters.get("capacity_kw") is not None or filters.get("capacity_tons") is not None
+    ):
+        filters["capacity_kw"] = None
+        filters["capacity_tons"] = None
+        checks.append(
+            "Capacity was ignored because a valve, strainer or quick disconnect is not "
+            "rated in kW. Size these on flow coefficient and connection size, and note "
+            "that a large loop needs several of them."
+        )
     if filters.get("connection_size_inch") is not None and filters.get("connection_size_mm") is None:
         filters["connection_size_mm"] = inch_to_mm(filters["connection_size_inch"])
         checks.append("Converted connection size from inches to millimeters for local matching.")
@@ -512,6 +523,13 @@ def run_assistant_query(
         required_temperature_c=filters.get("required_temperature_c"),
         top_n=int(filters.get("top_n") or 5),
     )
+
+    ranking_inputs = ("size_mm", "cv", "kv", "capacity_kw", "capacity_tons", "connection_size_mm")
+    if matches and not any(filters.get(key) is not None for key in ranking_inputs):
+        filters["checks"] = list(filters.get("checks", [])) + [
+            "No sizing criterion was given, so these are not ranked. Add a Cv/Kv, a "
+            "size or a capacity to order them."
+        ]
 
     if not matches:
         limits = []

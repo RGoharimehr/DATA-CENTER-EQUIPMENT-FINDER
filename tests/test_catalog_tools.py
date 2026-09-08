@@ -85,3 +85,35 @@ def test_sync_reports_every_url_individually(tmp_path) -> None:
     assert summary["skipped"] == 1
     assert [r["url"] for r in summary["results"]] == [url]
     assert summary["results"][0]["status"] == "skipped"
+
+
+def test_published_site_does_not_hardcode_the_category_vocabulary() -> None:
+    """The site's category list went stale the moment a category was added, hiding
+    every quick disconnect from the published finder."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    index = (root / "docs" / "index.html").read_text(encoding="utf-8")
+    app = (root / "docs" / "app.js").read_text(encoding="utf-8")
+
+    select = index.split('<select id="category"')[1].split("</select>")[0]
+    assert select.count("<option") == 1, "category options must be built from the catalog"
+    assert "CATALOG.map((x) => x.category)" in app
+
+
+def test_published_site_ranks_the_same_way_as_the_engine() -> None:
+    from pathlib import Path
+
+    from datacenter_equipment_finder.matching import (
+        DISPUTED_PENALTY,
+        FLOW_COEFFICIENT_CATEGORIES,
+        UNKNOWN_PENALTY,
+        UNVERIFIED_PENALTY,
+    )
+
+    app = (Path(__file__).resolve().parents[1] / "docs" / "app.js").read_text(encoding="utf-8")
+    assert f"UNKNOWN_PENALTY = {UNKNOWN_PENALTY}" in app
+    assert f"UNVERIFIED_PENALTY = {UNVERIFIED_PENALTY}" in app
+    assert f"DISPUTED_PENALTY = {DISPUTED_PENALTY}" in app
+    for category in FLOW_COEFFICIENT_CATEGORIES:
+        assert f'"{category}"' in app, f"{category} missing from the site's flow categories"

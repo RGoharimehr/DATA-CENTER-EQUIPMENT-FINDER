@@ -48,6 +48,8 @@ def _build_parser() -> argparse.ArgumentParser:
     c.add_argument("--required-temperature-c", type=float, default=None,
                    help="Coolant temperature the whole assembly must withstand")
 
+    sub.add_parser("schema", help="Show the categories, subtypes and brands available")
+
     e = sub.add_parser("explain", help="Explain a property or category")
     e.add_argument("--property", dest="property_name")
     e.add_argument("--category")
@@ -97,6 +99,23 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "find":
+        service = EquipmentService.default()
+        schema = service.schema()
+        for value, field, valid in (
+            (args.category, "category", schema["categories"]),
+            (args.brand, "brand", schema["brands"]),
+        ):
+            if value and value.lower() not in {v.lower() for v in valid}:
+                print(f"Unknown {field} {value!r}. Available: {', '.join(valid)}")
+                return 2
+        if args.component_subtype:
+            subtypes = sorted({s for group in schema["subtypes_by_category"].values() for s in group})
+            if args.component_subtype.lower() not in {v.lower() for v in subtypes}:
+                print(
+                    f"Unknown component subtype {args.component_subtype!r}. "
+                    f"Available: {', '.join(subtypes)}"
+                )
+                return 2
         if (args.cv is not None or args.kv is not None) and (args.category or "").lower() in {"cdu", "chiller", "filter_dryer"}:
             parser.error(f"--cv/--kv are not applicable for category '{args.category}'")
         catalog = EquipmentCatalog.from_csv()
@@ -136,6 +155,21 @@ def main() -> int:
                 print(f"     warning: {warning}")
         return 0
 
+    if args.command == "schema":
+        schema = EquipmentService.default().schema()
+        print("categories:")
+        for category in schema["categories"]:
+            subtypes = schema["subtypes_by_category"].get(category, [])
+            hints = schema["input_hints"].get(category, [])
+            print(f"  {category}")
+            if subtypes:
+                print(f"    subtypes: {', '.join(subtypes)}")
+            if hints:
+                print(f"    select on: {', '.join(hints)}")
+        print(f"\nbrands: {', '.join(schema['brands'])}")
+        print(f"\nduty limits: {', '.join(schema['duty_limits'])}")
+        return 0
+
     if args.command == "compat":
         catalog = EquipmentCatalog.from_csv()
         selected = [
@@ -170,12 +204,33 @@ def main() -> int:
         return 0
 
     if args.command == "assist":
-        output = run_assistant_query(
+        result = run_assistant_query(
             args.query,
             EquipmentService.default(),
             mode=args.mode,
         )
-        print(output)
+        filters = {
+            key: value
+            for key, value in result["filters"].items()
+            if value not in (None, "", []) and key != "checks"
+        }
+        print("interpreted as: " + ", ".join(f"{k}={v}" for k, v in filters.items()))
+        for check in result["checks"]:
+            print(f"  note: {check}")
+        if not result["matches"]:
+            print("no matching component")
+            return 1
+        print()
+        for i, match in enumerate(result["matches"], start=1):
+            c = match["component"]
+            print(
+                f"{i}. {c['part_number']} | {c['brand']} {c['category']} "
+                f"| size_mm={c['nominal_size_mm']} "
+                f"| coeff={c['flow_coefficient_type']}:{c['flow_coefficient_value']} "
+                f"| cap_kw={c['capacity_kw']} | score={match['score']:.4f}"
+            )
+            for warning in match.get("warnings", []):
+                print(f"     warning: {warning}")
         return 0
 
     if args.command == "serve":

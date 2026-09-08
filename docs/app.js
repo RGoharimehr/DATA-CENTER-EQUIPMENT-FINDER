@@ -28,21 +28,71 @@ function findMatches(params) {
     return true;
   });
 
-  const scored = filtered.map((c) => {
-    let score = 0;
-    score += ndelta(toNum(c.nominal_size_mm), params.size_mm, 0.2);
-    if (params.connection_size_mm != null) {
-      const connMm = toNum(c.nominal_size_mm) ?? (toNum(c.nominal_size_inch) != null ? toNum(c.nominal_size_inch) * MM_PER_INCH : null);
-      score += 1.2 * ndelta(connMm, params.connection_size_mm, 0.35);
+  // Mirrors matching.py. These two implementations rank the same catalog, so they
+  // have to agree: the site previously kept the old scoring and quietly gave
+  // different answers from the CLI for the same query.
+  const UNKNOWN_PENALTY = 0.75;
+  const UNVERIFIED_PENALTY = 0.05;
+  const DISPUTED_PENALTY = 0.4;
+  const FLOW_CATEGORIES = ["valve", "strainer", "quick_disconnect"];
+
+  const delta = (value, target) => {
+    if (target == null) return null;
+    if (value == null) return UNKNOWN_PENALTY;
+    return Math.abs(value - target) / Math.max(Math.abs(target), 1e-9);
+  };
+
+  const scored = [];
+  for (const c of filtered) {
+    const category = String(c.category || "").toLowerCase();
+    const pressure = toNum(c.pressure_rating_bar);
+    const maxTemp = toNum(c.max_temperature_c);
+    const warnings = [];
+
+    // Duty limits are hard filters, as in the engine.
+    if (params.required_pressure_bar != null) {
+      if (pressure != null && pressure < params.required_pressure_bar) continue;
+      if (pressure == null) warnings.push("pressure rating not published");
     }
-    const allowsFlow = ["valve", "strainer"].includes(String(c.category || "").toLowerCase());
-    if (allowsFlow && (params.cv != null || params.kv != null)) {
-      score += ndelta(coeffForTarget(c, params.cv, params.kv), params.cv ?? params.kv, 0.6);
+    if (params.required_temperature_c != null) {
+      if (maxTemp != null && maxTemp < params.required_temperature_c) continue;
+      if (maxTemp == null) warnings.push("maximum temperature not published");
     }
-    score += ndelta(toNum(c.capacity_kw), params.capacity_kw, 0.3);
-    if (c.estimated_price_usd == null || c.estimated_price_usd === "") score += 0.05;
-    return { score, component: c };
-  });
+
+    const flow = FLOW_CATEGORIES.includes(category);
+    const w = flow
+      ? { capacity: 1.0, size: 0.8, connection: 1.0, coefficient: 2.0 }
+      : { capacity: 2.0, size: 0.6, connection: 0.8, coefficient: 1.0 };
+
+    let weighted = 0;
+    let total = 0;
+    const add = (d, weight) => {
+      if (d == null) return;
+      weighted += weight * d;
+      total += weight;
+    };
+
+    add(delta(toNum(c.nominal_size_mm), params.size_mm), w.size);
+    const connMm = toNum(c.nominal_size_mm) ?? (toNum(c.nominal_size_inch) != null ? toNum(c.nominal_size_inch) * MM_PER_INCH : null);
+    add(delta(connMm, params.connection_size_mm), w.connection);
+    const targetCoeff = params.cv != null ? params.cv : params.kv;
+    if (flow && targetCoeff != null) {
+      add(delta(coeffForTarget(c, params.cv, params.kv), targetCoeff), w.coefficient);
+    }
+    add(delta(toNum(c.capacity_kw), params.capacity_kw), w.capacity);
+
+    let score = total ? weighted / total : 0;
+    const status = String(c.verification_status || "unverified").toLowerCase();
+    if (status === "disputed") {
+      score += DISPUTED_PENALTY;
+      warnings.push("vendor literature does not support this entry");
+    } else if (status !== "verified") {
+      score += UNVERIFIED_PENALTY;
+      warnings.push("specifications not verified against a source document");
+    }
+
+    scored.push({ score, warnings, component: c });
+  }
 
   return scored.sort((a, b) => a.score - b.score).slice(0, Math.max(1, params.top_n));
 }
@@ -111,11 +161,19 @@ function checkCompatibility(partNumbers, requiredMaterial, maxTime, requiredConn
 
 function bindUi() {
   const categoryEl = document.getElementById("category");
+  // Build the vocabulary from the catalog rather than the markup.
+  for (const category of [...new Set(CATALOG.map((x) => x.category))].sort()) {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    categoryEl.appendChild(option);
+  }
   const cvEl = document.getElementById("cv");
   const kvEl = document.getElementById("kv");
   function syncInputHints() {
     const c = categoryEl.value;
-    const flowEnabled = !c || c === "valve" || c === "strainer";
+    // Cv/Kv apply to quick disconnects too.
+    const flowEnabled = !c || ["valve", "strainer", "quick_disconnect"].includes(c);
     cvEl.disabled = !flowEnabled;
     kvEl.disabled = !flowEnabled;
     if (!flowEnabled) {
@@ -137,6 +195,8 @@ function bindUi() {
       cv: toNum(document.getElementById("cv").value),
       kv: toNum(document.getElementById("kv").value),
       capacity_kw: toNum(document.getElementById("cap").value),
+      required_pressure_bar: toNum(document.getElementById("reqBar").value),
+      required_temperature_c: toNum(document.getElementById("reqC").value),
       top_n: Number(document.getElementById("topn").value || 5)
     };
     if (params.connection_size_mm == null && params.connection_size_inch != null) {

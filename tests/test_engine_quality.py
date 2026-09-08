@@ -143,3 +143,28 @@ def test_psi_is_converted_to_bar() -> None:
     filters = local_parse_query("quick disconnect for a 150 psi system", _service())
     assert filters["required_pressure_bar"] is not None
     assert abs(filters["required_pressure_bar"] - 10.34) < 0.05
+
+
+def test_every_category_publishes_how_to_select_it() -> None:
+    # A careless edit once dropped filter_dryer, cdu and chiller out of input_hints and
+    # into duty_limits, and the /schema endpoint served that for several commits
+    # because nothing asserted its shape.
+    schema = _service().schema()
+    for category in schema["categories"]:
+        assert category in schema["input_hints"], f"{category} has no input hints"
+        assert schema["input_hints"][category], category
+
+
+def test_duty_limits_lists_only_duty_limits() -> None:
+    schema = _service().schema()
+    assert set(schema["duty_limits"]) == {"required_pressure_bar", "required_temperature_c"}
+    for description in schema["duty_limits"].values():
+        assert isinstance(description, str)
+
+
+def test_capacity_is_ignored_for_components_not_rated_in_kw() -> None:
+    # "quick disconnect for a 1 MW rack loop" previously returned the smallest coupling
+    # in the catalog, because capacity was applied to a component that has none.
+    filters = local_parse_query("quick disconnect for a 1 MW rack loop", _service())
+    assert filters["capacity_kw"] is None
+    assert any("Capacity was ignored" in c for c in filters["checks"])
