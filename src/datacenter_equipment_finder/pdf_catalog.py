@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from pypdf import PdfReader
 
 from .assistant import AssistantConfig, default_assistant_config
-from .catalog import FIELD_NAMES
+from .catalog import CATEGORY_ALIASES, FIELD_NAMES, KNOWN_CATEGORIES
 from .catalog_tools import build_sqlite_database
 from .dataset_pipeline import validate_rows
 
@@ -89,6 +89,7 @@ def _pdf_prompt(text_chunk: str) -> str:
         "'10U Coolant Distribution Unit'. Never invent a code.\n"
         "Do not guess numeric values. Leave a field empty rather than estimating it.\n"
         f"Schema keys: {FIELD_NAMES}\n"
+        f"category must be exactly one of: {sorted(KNOWN_CATEGORIES)}\n"
         'Return an object like {"rows": [...]}.\n'
         f"PDF text:\n{text_chunk}"
     )
@@ -166,7 +167,8 @@ def _normalize_value(value: Any) -> str:
 def _normalize_row(row: dict[str, Any]) -> dict[str, str]:
     normalized = {field: _normalize_value(row.get(field)) for field in FIELD_NAMES}
     normalized["verification_status"] = "unverified"
-    normalized["category"] = normalized["category"].lower().replace(" ", "_")
+    category = normalized["category"].lower().replace(" ", "_").replace("-", "_")
+    normalized["category"] = CATEGORY_ALIASES.get(category, category)
     normalized["component_subtype"] = normalized["component_subtype"].lower().replace(" ", "_")
     coeff = normalized["flow_coefficient_type"].lower()
     if coeff == "cv":
@@ -288,6 +290,13 @@ def build_database_from_pdf(
         max_pages=max_pages,
         max_chars_per_chunk=max_chars_per_chunk,
     )
+    # The command knows which document it read; the model should not have to report
+    # it, and "www.boydcorp.com" is not a citation.
+    source_name = Path(pdf_path).name
+    for row in extracted:
+        if not row.get("source_catalog", "").strip():
+            row["source_catalog"] = source_name
+
     rows, rejected = _partition_rows(extracted)
 
     if strict and rejected:

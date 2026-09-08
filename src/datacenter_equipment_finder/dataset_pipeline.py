@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 from typing import Iterable
 
-from .catalog import FIELD_NAMES
+from .catalog import FIELD_NAMES, KNOWN_CATEGORIES
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -47,6 +47,20 @@ def validate_rows(rows: Iterable[dict[str, str]]) -> list[str]:
                     float(value)
                 except ValueError:
                     errors.append(f"row {idx}: invalid float for {numeric}={value}")
+
+        category = (row.get("category") or "").strip().lower()
+        if not category:
+            errors.append(f"row {idx}: missing category")
+        elif category not in KNOWN_CATEGORIES:
+            errors.append(
+                f"row {idx}: unknown category {category!r} "
+                f"(expected one of {', '.join(sorted(KNOWN_CATEGORIES))})"
+            )
+
+        # Every row has to say where it came from. Without this a row can enter the
+        # catalog with no traceable source at all.
+        if not (row.get("source_catalog") or "").strip():
+            errors.append(f"row {idx}: missing source_catalog")
 
         data_url = (row.get("datasheet_url") or "").strip().lower()
         if data_url and not data_url.startswith(("http://", "https://")):

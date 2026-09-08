@@ -8,6 +8,34 @@ from typing import Iterable, Optional
 from .models import EquipmentComponent
 
 
+# The catalog's categories are a controlled vocabulary. Adding one is a deliberate
+# change: matching, the schema hints and the explanations all need to know about it.
+KNOWN_CATEGORIES = {
+    "valve",
+    "strainer",
+    "filter_dryer",
+    "cdu",
+    "chiller",
+    "quick_disconnect",
+}
+
+# Plausible names a model may produce for an existing category. Mapping these is safe;
+# anything outside the vocabulary is rejected rather than guessed at.
+CATEGORY_ALIASES = {
+    "coolant_distribution_unit": "cdu",
+    "cooling_distribution_unit": "cdu",
+    "coolant_distribution_units": "cdu",
+    "quick_disconnect_coupling": "quick_disconnect",
+    "quick_connect": "quick_disconnect",
+    "coupling": "quick_disconnect",
+    "filter_drier": "filter_dryer",
+    "filter_dryers": "filter_dryer",
+    "valves": "valve",
+    "strainers": "strainer",
+    "chillers": "chiller",
+}
+
+
 FIELD_NAMES = [
     "brand",
     "category",

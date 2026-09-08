@@ -214,3 +214,39 @@ def test_a_timeout_says_how_to_raise_it(tmp_path: Path, slow_model: str) -> None
             write_text_pdf(tmp_path / "v.pdf", ["catalog"]),
             tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv", config=config,
         )
+
+
+class _AliasModel(_StubModel):
+    def do_POST(self) -> None:  # noqa: N802
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        row = dict(ROW, category="coolant_distribution_unit", source_catalog="")
+        body = json.dumps({"response": json.dumps({"rows": [row]})}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture()
+def alias_model():
+    server = HTTPServer(("127.0.0.1", 0), _AliasModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}/api/generate"
+    server.shutdown()
+    server.server_close()
+
+
+def test_category_synonyms_are_normalised_and_source_is_stamped(tmp_path: Path, alias_model: str) -> None:
+    pdf = write_text_pdf(tmp_path / "boyd-datasheet.pdf", ["catalog"])
+    summary = build_database_from_pdf(
+        pdf, tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv",
+        config=AssistantConfig(local_endpoint=alias_model, local_model="stub"),
+    )
+    assert summary["rows"] == 1
+    with sqlite3.connect(summary["sqlite_path"]) as conn:
+        category, source = conn.execute(
+            "SELECT category, source_catalog FROM equipment_catalog"
+        ).fetchone()
+    assert category == "cdu"
+    assert source == "boyd-datasheet.pdf"

@@ -98,3 +98,31 @@ def test_disputed_rows_are_pushed_below_verified_ones() -> None:
     for m in find_closest_components(components, category="valve", target_cv=7.0, top_n=20):
         if m.component.verification_status == "disputed":
             assert any("does not support" in w for w in m.warnings), m.component.part_number
+
+
+def test_every_category_is_in_the_controlled_vocabulary() -> None:
+    # A PDF extraction produced "coolant_distribution_unit", which reads fine and is
+    # invisible to every --category cdu search. Nothing checked it.
+    from datacenter_equipment_finder.catalog import KNOWN_CATEGORIES
+
+    for c in _components():
+        assert c.category in KNOWN_CATEGORIES, f"{c.part_number}: {c.category}"
+
+
+def test_validation_rejects_an_unknown_category() -> None:
+    from datacenter_equipment_finder.catalog import FIELD_NAMES
+    from datacenter_equipment_finder.dataset_pipeline import validate_rows
+
+    row = {name: "" for name in FIELD_NAMES}
+    row.update(part_number="X", category="coolant_distribution_unit", source_catalog="doc")
+    errors = validate_rows([row])
+    assert any("unknown category" in e for e in errors), errors
+
+
+def test_validation_requires_a_source() -> None:
+    from datacenter_equipment_finder.catalog import FIELD_NAMES
+    from datacenter_equipment_finder.dataset_pipeline import validate_rows
+
+    row = {name: "" for name in FIELD_NAMES}
+    row.update(part_number="X", category="cdu")
+    assert any("missing source_catalog" in e for e in validate_rows([row]))

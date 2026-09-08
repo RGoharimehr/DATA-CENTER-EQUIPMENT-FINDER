@@ -464,14 +464,15 @@ this field exists:
 Every catalog row must be traceable to a published vendor document. These rules
 are enforced by `tests/test_catalog_data_quality.py`:
 
-1. `source_catalog` and `datasheet_url` are required on every row, and the URL must be a real published document. A row marked `verified` must cite a specific document, not a vendor landing page.
-2. Specifications are transcribed from that document. Values are never inferred, interpolated between models, or estimated.
-3. `part_number` uses the manufacturer's own SKU where one is published. Where a vendor publishes a product designation but no public SKU (common for CDUs), the vendor's designation is used verbatim - for example `CoolChip CDU 1350` or `Boyd 10U CDU`.
-4. Where different vendors publish different figures for the same nominal UQD size, each vendor's own published figure is recorded. The spread between them is real and is exactly what the finder is meant to surface.
-5. `max_temperature_c` is the **product** operating limit, never the seal elastomer's material rating. Datasheets print both, and the elastomer figure is often far higher - Danfoss Hansen UQD couplings operate to 65 C while their EPDM-P seal material is rated to 150 C.
-6. Capacity ratings are condition-dependent. Where a datasheet states an approach temperature or flow condition, record it in `component_name` so two rows are not compared at different conditions.
-7. `estimated_price_usd` and `install_connection_time_min` are the only estimated fields. Leave them blank rather than guessing.
-8. Unit pairs must agree: `capacity_kw` / `capacity_tons` within 2%, `nominal_size_mm` / `nominal_size_inch` within 5%.
+1. `source_catalog` is required on every row and enforced by `validate_rows`; a row with no traceable source cannot enter the catalog. `datasheet_url` must be a real published document, and a row marked `verified` must cite a specific document rather than a vendor landing page.
+2. `category` must be one of the controlled vocabulary in `catalog.KNOWN_CATEGORIES`. A plausible-sounding category such as `coolant_distribution_unit` is invisible to every `--category cdu` search, so unknown values are rejected rather than guessed at. `CATEGORY_ALIASES` maps a few obvious synonyms. A row marked `verified` must cite a specific document, not a vendor landing page.
+3. Specifications are transcribed from that document. Values are never inferred, interpolated between models, or estimated.
+4. `part_number` uses the manufacturer's own SKU where one is published. Where a vendor publishes a product designation but no public SKU (common for CDUs), the vendor's designation is used verbatim - for example `CoolChip CDU 1350` or `Boyd 10U CDU`.
+5. Where different vendors publish different figures for the same nominal UQD size, each vendor's own published figure is recorded. The spread between them is real and is exactly what the finder is meant to surface.
+6. `max_temperature_c` is the **fluid** limit: never the seal elastomer's material rating, and never an ambient-air rating. Boyd's 10U CDU publishes a 45 C *ambient* limit and no fluid temperature at all, so the field is left empty rather than filled with the air figure - the matcher treats it as a coolant duty limit. Datasheets print both, and the elastomer figure is often far higher - Danfoss Hansen UQD couplings operate to 65 C while their EPDM-P seal material is rated to 150 C.
+7. Capacity ratings are condition-dependent. Where a datasheet states an approach temperature or flow condition, record it in `component_name` so two rows are not compared at different conditions.
+8. `estimated_price_usd` and `install_connection_time_min` are the only estimated fields. Leave them blank rather than guessing.
+9. Unit pairs must agree: `capacity_kw` / `capacity_tons` within 2%, `nominal_size_mm` / `nominal_size_inch` within 5%.
 
 The packaged CSV uses a unified schema for Parker/Danfoss valves, strainers, filter-dryers, CDUs, chillers, and OCP UQD quick disconnects.
 
