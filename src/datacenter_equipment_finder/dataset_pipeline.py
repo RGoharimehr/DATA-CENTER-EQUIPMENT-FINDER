@@ -62,6 +62,22 @@ def validate_rows(rows: Iterable[dict[str, str]]) -> list[str]:
         if not (row.get("source_catalog") or "").strip():
             errors.append(f"row {idx}: missing source_catalog")
 
+        # The finder selects on capacity, size or flow coefficient. A row carrying
+        # none of them can never be returned by a search, so it is not a usable entry.
+        if not any(
+            (row.get(field) or "").strip()
+            for field in (
+                "capacity_kw",
+                "capacity_tons",
+                "nominal_size_mm",
+                "nominal_size_inch",
+                "flow_coefficient_value",
+            )
+        ):
+            errors.append(
+                f"row {idx}: no capacity, size or flow coefficient - nothing to match on"
+            )
+
         data_url = (row.get("datasheet_url") or "").strip().lower()
         if data_url and not data_url.startswith(("http://", "https://")):
             errors.append(f"row {idx}: invalid datasheet_url {data_url}")

@@ -126,3 +126,30 @@ def test_validation_requires_a_source() -> None:
     row = {name: "" for name in FIELD_NAMES}
     row.update(part_number="X", category="cdu")
     assert any("missing source_catalog" in e for e in validate_rows([row]))
+
+
+def test_a_row_with_nothing_to_match_on_is_rejected() -> None:
+    # The Trane extraction produced "Expansion tank" and "Series chiller arrangement":
+    # valid-looking rows with no capacity, size or flow coefficient, which no search
+    # can ever return.
+    from datacenter_equipment_finder.catalog import FIELD_NAMES
+    from datacenter_equipment_finder.dataset_pipeline import validate_rows
+
+    row = {name: "" for name in FIELD_NAMES}
+    row.update(part_number="Expansion tank", category="cdu", source_catalog="doc.pdf")
+    errors = validate_rows([row])
+    assert any("nothing to match on" in e for e in errors), errors
+
+
+def test_every_catalog_row_can_actually_be_matched() -> None:
+    for c in _components():
+        assert any(
+            value is not None
+            for value in (
+                c.capacity_kw,
+                c.capacity_tons,
+                c.nominal_size_mm,
+                c.nominal_size_inch,
+                c.flow_coefficient_value,
+            )
+        ), f"{c.part_number} cannot be returned by any search"

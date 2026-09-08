@@ -250,3 +250,43 @@ def test_category_synonyms_are_normalised_and_source_is_stamped(tmp_path: Path, 
         ).fetchone()
     assert category == "cdu"
     assert source == "boyd-datasheet.pdf"
+
+
+def test_prompt_does_not_hand_the_model_an_identifier_to_copy() -> None:
+    # A worked example in the prompt was copied verbatim into the output of an
+    # unrelated catalog, producing a Boyd product row from a Trane document.
+    from datacenter_equipment_finder.pdf_catalog import _pdf_prompt
+
+    prompt = _pdf_prompt("some catalog text")
+    assert "10U Coolant Distribution Unit" not in prompt
+    assert "never copy an identifier from these instructions" in prompt.lower()
+
+
+class _DocNumberModel(_StubModel):
+    def do_POST(self) -> None:  # noqa: N802
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        row = dict(ROW, part_number="RLC-PRC006N-EN")
+        body = json.dumps({"response": json.dumps({"rows": [row]})}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture()
+def doc_number_model():
+    server = HTTPServer(("127.0.0.1", 0), _DocNumberModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}/api/generate"
+    server.shutdown()
+    server.server_close()
+
+
+def test_the_documents_own_number_is_not_taken_as_a_part_number(tmp_path: Path, doc_number_model: str) -> None:
+    pdf = write_text_pdf(tmp_path / "ad431a88e6_RLC-PRC006N-EN.pdf", ["catalog"])
+    with pytest.raises(ValueError, match="No usable rows"):
+        build_database_from_pdf(
+            pdf, tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv",
+            config=AssistantConfig(local_endpoint=doc_number_model, local_model="stub"),
+        )

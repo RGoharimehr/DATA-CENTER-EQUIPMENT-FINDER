@@ -84,9 +84,14 @@ def _pdf_prompt(text_chunk: str) -> str:
         "Only include rows that represent actual equipment items.\n"
         "Every field value must be a string; use an empty string when unknown.\n"
         "part_number is required. Use the manufacturer's ordering code or SKU when the "
-        "document prints one. When it does not - common for CDUs and chillers - use the "
-        "vendor's product designation exactly as printed, for example "
-        "'10U Coolant Distribution Unit'. Never invent a code.\n"
+        "document prints one. When it does not, use the vendor's product designation "
+        "exactly as printed in this document. Never invent a code, and never copy an "
+        "identifier from these instructions.\n"
+        "Emit a row only for a component that can be ordered and that this document "
+        "gives at least one number for: a capacity, a nominal or connection size, or a "
+        "flow coefficient. Do not emit rows for system arrangements, piping topologies, "
+        "application notes, accessories mentioned only in prose, or the document's own "
+        "title or publication number.\n"
         "Do not guess numeric values. Leave a field empty rather than estimating it.\n"
         f"Schema keys: {FIELD_NAMES}\n"
         f"category must be exactly one of: {sorted(KNOWN_CATEGORIES)}\n"
@@ -293,9 +298,16 @@ def build_database_from_pdf(
     # The command knows which document it read; the model should not have to report
     # it, and "www.boydcorp.com" is not a citation.
     source_name = Path(pdf_path).name
+    document_tokens = {
+        Path(pdf_path).stem.lower(),
+        Path(pdf_path).stem.split("_", 1)[-1].lower(),
+    }
     for row in extracted:
         if not row.get("source_catalog", "").strip():
             row["source_catalog"] = source_name
+        # A catalog's own publication number reads like a part number; it is not one.
+        if row.get("part_number", "").strip().lower() in document_tokens:
+            row["part_number"] = ""
 
     rows, rejected = _partition_rows(extracted)
 

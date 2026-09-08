@@ -260,6 +260,14 @@ dcef build-db-from-pdf path/to/vendor-datasheet.pdf \
   --db-path vendor_catalog.sqlite --csv-path vendor_catalog.csv
 ```
 
+**Treat the output as a lead, not a result.** On a 72-page product catalog with
+llama3.1, every row that passed validation was unusable: system arrangements and an
+expansion tank catalogued as components, and the document's own publication number
+taken for a part number. The guards below reject that class of row, but they check
+shape, not truth - a plausible wrong number still passes. Extraction is worth using to
+find candidate rows in a document you then read yourself. It is not worth using to
+populate the catalog unattended.
+
 Extraction keeps the rows it can use and sets the rest aside. Anything rejected is
 written to `<csv-path>.rejected.json` with the reason, so a bad row can be corrected
 rather than re-run blind. Pass `--strict` to fail the whole run instead. The command
