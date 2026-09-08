@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from .dataset_pipeline import build_catalog_from_vendor_sources
 from .explanations import explain_category, explain_property
 from .matching import find_closest_components
 from .pdf_catalog import build_database_from_pdf
+from .rd_studio import duties_from_valve_schedule
 from .service import EquipmentService
 from .web import run_server
 
@@ -55,7 +57,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "select",
         help="Shortlist parts against a design's per-component duties (JSON in, JSON out)",
     )
-    sel.add_argument("--duty", required=True, help="Path to a duty spec, or - for stdin")
+    source = sel.add_mutually_exclusive_group(required=True)
+    source.add_argument("--duty", help="Path to a duty spec, or - for stdin")
+    source.add_argument("--schedule", help="Path to a reference-design valve schedule CSV")
     sel.add_argument("--top-n", type=int, default=3)
 
     sub.add_parser("schema", help="Show the categories, subtypes and brands available")
@@ -166,17 +170,27 @@ def main() -> int:
         return 0
 
     if args.command == "select":
+        if args.schedule:
+            try:
+                items = duties_from_valve_schedule(args.schedule)
+            except (OSError, csv.Error) as exc:
+                print(f"select failed: could not read the schedule ({exc})")
+                return 2
+            selection = EquipmentService.default().select_for_duty(items, top_n=args.top_n)
+            print(json.dumps(selection, indent=2))
+            return 1 if selection["unresolved"] else 0
+
         raw = sys.stdin.read() if args.duty == "-" else Path(args.duty).read_text(encoding="utf-8")
         try:
             spec = json.loads(raw)
         except json.JSONDecodeError as exc:
             print(f"select failed: duty spec is not valid JSON ({exc})")
             return 2
-        items = spec.get("items") if isinstance(spec, dict) else spec
-        if not isinstance(items, list):
+        parsed_items = spec.get("items") if isinstance(spec, dict) else spec
+        if not isinstance(parsed_items, list):
             print("select failed: expected a JSON list of duty items, or an object with an 'items' list")
             return 2
-        selection = EquipmentService.default().select_for_duty(items, top_n=args.top_n)
+        selection = EquipmentService.default().select_for_duty(parsed_items, top_n=args.top_n)
         print(json.dumps(selection, indent=2))
         return 1 if selection["unresolved"] else 0
 

@@ -4,7 +4,11 @@ from dataclasses import asdict
 from typing import Any
 
 from .catalog import EquipmentCatalog, FIELD_NAMES
-from .compatibility import check_compatibility
+from .compatibility import (
+    _material_families,
+    acceptable_material_families,
+    check_compatibility,
+)
 from .explanations import explain_category, explain_property
 from .matching import find_closest_components
 
@@ -135,6 +139,22 @@ class EquipmentService:
         """
         results: list[dict[str, Any]] = []
         for item in items:
+            # A schedule row with no assigned duty is not a selection problem. Saying
+            # so is the answer; shortlisting on nominal bore alone would look like an
+            # engineering result and rest on nothing.
+            if item.get("duty_unassigned") or item.get("unmappable"):
+                results.append(
+                    {
+                        "tag": item.get("tag"),
+                        "loop": item.get("loop"),
+                        "quantity": item.get("quantity"),
+                        "duty": {k: v for k, v in item.items() if v is not None},
+                        "candidates": [],
+                        "unmet": [item.get("unmappable") or item["duty_unassigned"]],
+                    }
+                )
+                continue
+
             matches = self.find_components(
                 category=item.get("category"),
                 component_subtype=item.get("component_subtype"),
@@ -149,6 +169,30 @@ class EquipmentService:
                 connection_size_inch=item.get("connection_size_inch"),
                 top_n=top_n,
             )
+            # Wetted material is a requirement, not a preference: a copper branch
+            # fitting does not become acceptable on a stainless line by ranking well.
+            required_material = item.get("required_material")
+            if required_material:
+                wanted = acceptable_material_families(required_material)
+                exact = _material_families(required_material)
+                kept = []
+                for match in matches:
+                    material = match["component"].get("material")
+                    families = _material_families(material) if material else set()
+                    if not families:
+                        match["warnings"].append(
+                            f"wetted material not published; {required_material} not confirmed"
+                        )
+                        kept.append(match)
+                    elif families & wanted:
+                        if not (families & exact):
+                            match["warnings"].append(
+                                f"{material} on a {required_material} line: an accepted "
+                                "substitution, confirm against the project specification"
+                            )
+                        kept.append(match)
+                matches = kept
+
             unmet: list[str] = []
             if not matches:
                 for label, value, unit in (
@@ -161,9 +205,13 @@ class EquipmentService:
                 ):
                     if value is not None:
                         unmet.append(f"{label} {value:g}{unit}")
+                if item.get("required_material"):
+                    unmet.append(f"wetted material {item['required_material']}")
             results.append(
                 {
                     "tag": item.get("tag"),
+                    "loop": item.get("loop"),
+                    "quantity": item.get("quantity"),
                     "duty": {k: v for k, v in item.items() if v is not None},
                     "candidates": matches,
                     "unmet": unmet,
@@ -173,11 +221,26 @@ class EquipmentService:
         selected = [
             r["candidates"][0]["component"]["part_number"] for r in results if r["candidates"]
         ]
-        envelope = self.compatibility(selected) if len(selected) > 1 else None
+
+        # One envelope per hydraulic loop. TCS and FWS meet only across the CDU's
+        # thermal coupling, so treating every selected part as one assembly would
+        # report a governing pressure for a circuit that does not exist.
+        by_loop: dict[str, list[str]] = {}
+        for r in results:
+            if r["candidates"]:
+                loop = r.get("loop") or "unspecified"
+                by_loop.setdefault(loop, []).append(
+                    r["candidates"][0]["component"]["part_number"]
+                )
+        assemblies = {
+            loop: self.compatibility(parts)
+            for loop, parts in by_loop.items()
+            if len(parts) > 1
+        }
         return {
             "items": results,
             "selected_part_numbers": selected,
-            "assembly": envelope,
+            "assemblies_by_loop": assemblies,
             "unresolved": [r["tag"] for r in results if not r["candidates"]],
             "note": (
                 "Shortlist by published capacity only. Vendor review of trim, authority, "

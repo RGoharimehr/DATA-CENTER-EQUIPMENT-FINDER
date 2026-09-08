@@ -42,6 +42,27 @@ _COOLANT_FAMILIES: dict[str, tuple[str, ...]] = {
     "co2": ("co2", "r744"),
 }
 
+# Material families that are routinely used together on the same line. A bronze or
+# brass valve body on a copper line is ordinary hydronic practice, so a copper
+# requirement should not reject it; the substitution is still reported.
+COMPATIBLE_MATERIAL_FAMILIES: dict[str, set[str]] = {
+    "copper": {"copper", "brass/bronze"},
+    "brass/bronze": {"brass/bronze", "copper"},
+    "carbon steel": {"carbon steel", "stainless steel", "cast iron"},
+    "stainless steel": {"stainless steel"},
+    "cast iron": {"cast iron", "carbon steel"},
+}
+
+
+def acceptable_material_families(required: str) -> set[str]:
+    """Families that satisfy a stated wetted-material requirement."""
+    families = _material_families(required) or {required.strip().lower()}
+    acceptable: set[str] = set()
+    for family in families:
+        acceptable |= COMPATIBLE_MATERIAL_FAMILIES.get(family, {family})
+    return acceptable
+
+
 # Dissimilar metals sharing a wetted loop invite galvanic attack. This is an advisory,
 # not an incompatibility: it depends on coolant chemistry, area ratio and inhibitors.
 _GALVANIC_PAIRS = {

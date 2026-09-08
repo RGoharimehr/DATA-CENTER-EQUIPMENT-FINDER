@@ -228,12 +228,44 @@ def test_select_for_duty_reports_what_it_could_not_resolve() -> None:
     assert impossible["unmet"] == ["required Kv 99999"]
 
 
-def test_select_for_duty_reports_the_assembly_envelope() -> None:
+def test_the_assembly_envelope_is_computed_per_loop() -> None:
+    # TCS and FWS meet only across the CDU's thermal coupling. Treating every selected
+    # part as one assembly reports a governing pressure for a circuit that does not
+    # exist, which SIZING_BASIS section 3 warns against.
     report = _service().select_for_duty(
         [
-            {"tag": "QD", "category": "quick_disconnect", "required_kv": 2.0},
-            {"tag": "VALVE", "category": "valve", "required_kv": 5.0},
+            {"tag": "TCS-QD", "loop": "TCS", "category": "quick_disconnect", "required_kv": 2.0},
+            {"tag": "TCS-VALVE", "loop": "TCS", "category": "valve", "required_kv": 5.0},
+            {"tag": "FWS-STRAINER", "loop": "FWS", "category": "strainer", "required_kv": 10.0},
         ]
     )
-    assert report["assembly"] is not None
-    assert "governing_pressure_bar" in report["assembly"]["limits"]
+    assert set(report["assemblies_by_loop"]) == {"TCS"}, report["assemblies_by_loop"]
+    assert "governing_pressure_bar" in report["assemblies_by_loop"]["TCS"]["limits"]
+
+
+def test_an_unassigned_duty_is_reported_not_guessed() -> None:
+    report = _service().select_for_duty(
+        [
+            {
+                "tag": "TCS-isolation_valve-2in",
+                "category": "valve",
+                "minimum_size_mm": 50.8,
+                "duty_unassigned": "the schedule reports manual geometry sizing and no valve Cv",
+            }
+        ]
+    )
+    assert report["unresolved"] == ["TCS-isolation_valve-2in"]
+    assert report["items"][0]["candidates"] == []
+    assert "manual geometry sizing" in report["items"][0]["unmet"][0]
+
+
+def test_wetted_material_is_a_requirement_not_a_preference() -> None:
+    report = _service().select_for_duty(
+        [{"tag": "CU", "category": "valve", "required_kv": 5.0, "required_material": "Copper"}]
+    )
+    for candidate in report["items"][0]["candidates"]:
+        material = candidate["component"].get("material")
+        if material:
+            assert "copper" in material.lower() or any(
+                "not published" in w for w in candidate["warnings"]
+            ), material

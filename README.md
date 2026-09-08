@@ -377,6 +377,35 @@ Rules:
 - If nothing qualifies, the CLI says so and exits non-zero, and the assistant returns
   no matches plus an explicit check. It never quietly relaxes the limit.
 
+## Reading a reference-design schedule
+
+```bash
+dcef select --schedule valve_schedule.csv
+```
+
+Reads a generator's valve schedule directly. `type` maps to a catalogue category,
+`service` becomes the hydraulic loop, `material` becomes a wetted-material
+requirement, `size_nominal_in` a minimum bore, and `valve_Cv` the required Cv (US) at
+the allocated `dp_Pa`.
+
+Rows are grouped into distinct duties: a 126-row schedule for a 32-rack design holds
+eight, and selecting per row would repeat the same answer 64 times. Each duty carries
+the tags and quantity it covers.
+
+**A schedule sized in manual geometry mode has no duty to select against.** Those rows
+report `unassigned; manual geometry sizing` with an empty `valve_Cv`, so there is no
+flow and no allocated pressure drop. Every duty comes back unresolved with that reason.
+Shortlisting on nominal bore alone would look like an engineering result while resting
+on nothing. Run preliminary sizing first.
+
+Loops are kept apart. TCS and FWS meet only across the CDU's thermal coupling, so the
+assembly envelope is reported per loop rather than treating every selected part as one
+circuit.
+
+A bronze or brass body on a copper line is accepted as ordinary hydronic practice and
+reported as a substitution to confirm. Stainless is not substituted for carbon steel or
+the reverse.
+
 ## Selecting against a design's duties
 
 `dcef select` and `POST /api/v1/select` take the per-component duties a sizing tool has
