@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sys
+from pathlib import Path
 
 from dataclasses import replace
 
@@ -47,6 +50,13 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="System pressure the whole assembly must withstand")
     c.add_argument("--required-temperature-c", type=float, default=None,
                    help="Coolant temperature the whole assembly must withstand")
+
+    sel = sub.add_parser(
+        "select",
+        help="Shortlist parts against a design's per-component duties (JSON in, JSON out)",
+    )
+    sel.add_argument("--duty", required=True, help="Path to a duty spec, or - for stdin")
+    sel.add_argument("--top-n", type=int, default=3)
 
     sub.add_parser("schema", help="Show the categories, subtypes and brands available")
 
@@ -154,6 +164,21 @@ def main() -> int:
             for warning in m.warnings:
                 print(f"     warning: {warning}")
         return 0
+
+    if args.command == "select":
+        raw = sys.stdin.read() if args.duty == "-" else Path(args.duty).read_text(encoding="utf-8")
+        try:
+            spec = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            print(f"select failed: duty spec is not valid JSON ({exc})")
+            return 2
+        items = spec.get("items") if isinstance(spec, dict) else spec
+        if not isinstance(items, list):
+            print("select failed: expected a JSON list of duty items, or an object with an 'items' list")
+            return 2
+        selection = EquipmentService.default().select_for_duty(items, top_n=args.top_n)
+        print(json.dumps(selection, indent=2))
+        return 1 if selection["unresolved"] else 0
 
     if args.command == "schema":
         schema = EquipmentService.default().schema()

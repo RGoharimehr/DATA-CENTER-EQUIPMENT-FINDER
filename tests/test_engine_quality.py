@@ -168,3 +168,72 @@ def test_capacity_is_ignored_for_components_not_rated_in_kw() -> None:
     filters = local_parse_query("quick disconnect for a 1 MW rack loop", _service())
     assert filters["capacity_kw"] is None
     assert any("Capacity was ignored" in c for c in filters["checks"])
+
+
+# --- selection against a required value (the design-tool path) --------------------
+
+def test_a_part_below_the_required_kv_is_not_a_candidate() -> None:
+    # SIZING_BASIS section 4: a candidate is one whose Kvs is at or above the required
+    # value. Nearest-match ranking offered valves that cannot pass the design flow at
+    # the allocated pressure drop.
+    catalog = _service().catalog
+    matches = find_closest_components(catalog.components, category="valve", required_kv=7.2, top_n=20)
+    assert matches
+    for m in matches:
+        c = m.component
+        if c.flow_coefficient_value is None:
+            continue
+        available = c.flow_coefficient_value
+        if (c.flow_coefficient_type or "").lower() == "cv":
+            available *= 0.865052
+        assert available >= 7.2 - 1e-9, f"{c.part_number} at {available} is undersized"
+
+
+def test_a_shortlist_is_ordered_by_least_oversize() -> None:
+    catalog = _service().catalog
+    matches = find_closest_components(
+        catalog.components, category="cdu", required_capacity_kw=1000.0, top_n=5
+    )
+    capacities = [m.component.capacity_kw for m in matches if m.component.capacity_kw]
+    assert capacities == sorted(capacities), capacities
+    assert capacities[0] >= 1000.0
+
+
+def test_gross_oversize_is_flagged_rather_than_presented_as_a_fit() -> None:
+    catalog = _service().catalog
+    top = find_closest_components(
+        catalog.components, category="valve", required_kv=16.2, minimum_size_mm=50.8, top_n=1
+    )[0]
+    assert any("the catalogue may hold no closer size" in w for w in top.warnings), top.warnings
+
+
+def test_an_unpublished_coefficient_is_flagged_not_assumed_adequate() -> None:
+    catalog = _service().catalog
+    matches = find_closest_components(catalog.components, category="cdu", required_capacity_kw=100.0, top_n=20)
+    unknown = [m for m in matches if m.component.capacity_kw is None]
+    for m in unknown:
+        assert any("cannot confirm" in w for w in m.warnings)
+
+
+def test_select_for_duty_reports_what_it_could_not_resolve() -> None:
+    report = _service().select_for_duty(
+        [
+            {"tag": "CDU-1", "category": "cdu", "required_capacity_kw": 2000.0},
+            {"tag": "IMPOSSIBLE", "category": "valve", "required_kv": 99999.0},
+        ]
+    )
+    assert report["unresolved"] == ["IMPOSSIBLE"]
+    impossible = [i for i in report["items"] if i["tag"] == "IMPOSSIBLE"][0]
+    assert impossible["candidates"] == []
+    assert impossible["unmet"] == ["required Kv 99999"]
+
+
+def test_select_for_duty_reports_the_assembly_envelope() -> None:
+    report = _service().select_for_duty(
+        [
+            {"tag": "QD", "category": "quick_disconnect", "required_kv": 2.0},
+            {"tag": "VALVE", "category": "valve", "required_kv": 5.0},
+        ]
+    )
+    assert report["assembly"] is not None
+    assert "governing_pressure_bar" in report["assembly"]["limits"]

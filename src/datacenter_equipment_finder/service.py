@@ -90,6 +90,10 @@ class EquipmentService:
         connection_size_inch: float | None = None,
         required_pressure_bar: float | None = None,
         required_temperature_c: float | None = None,
+        required_cv: float | None = None,
+        required_kv: float | None = None,
+        required_capacity_kw: float | None = None,
+        minimum_size_mm: float | None = None,
         top_n: int = 5,
     ) -> list[dict[str, Any]]:
         matches = find_closest_components(
@@ -106,12 +110,80 @@ class EquipmentService:
             target_connection_size_inch=connection_size_inch,
             required_pressure_bar=required_pressure_bar,
             required_temperature_c=required_temperature_c,
+            required_cv=required_cv,
+            required_kv=required_kv,
+            required_capacity_kw=required_capacity_kw,
+            minimum_size_mm=minimum_size_mm,
             top_n=top_n,
         )
         return [
             {"score": m.score, "component": asdict(m.component), "warnings": list(m.warnings)}
             for m in matches
         ]
+
+    def select_for_duty(self, items: list[dict[str, Any]], *, top_n: int = 3) -> dict[str, Any]:
+        """Shortlist catalogue parts against a design's per-component duties.
+
+        Intended for a design tool that has already sized the network: it supplies a
+        required Kv or Cv (US) at its allocated pressure drop, a required capacity, a
+        minimum bore and the duty pressure and temperature, and gets back candidates
+        that can actually meet them.
+
+        A shortlist is a capacity check only. Trim characteristic, valve authority,
+        cavitation limits, materials and vendor review remain outside this tool, as
+        does any statement about a balanced or commissioned network.
+        """
+        results: list[dict[str, Any]] = []
+        for item in items:
+            matches = self.find_components(
+                category=item.get("category"),
+                component_subtype=item.get("component_subtype"),
+                brand=item.get("brand"),
+                required_cv=item.get("required_cv"),
+                required_kv=item.get("required_kv"),
+                required_capacity_kw=item.get("required_capacity_kw"),
+                minimum_size_mm=item.get("minimum_size_mm"),
+                required_pressure_bar=item.get("required_pressure_bar"),
+                required_temperature_c=item.get("required_temperature_c"),
+                connection_size_mm=item.get("connection_size_mm"),
+                connection_size_inch=item.get("connection_size_inch"),
+                top_n=top_n,
+            )
+            unmet: list[str] = []
+            if not matches:
+                for label, value, unit in (
+                    ("required Cv (US)", item.get("required_cv"), ""),
+                    ("required Kv", item.get("required_kv"), ""),
+                    ("required capacity", item.get("required_capacity_kw"), " kW"),
+                    ("minimum bore", item.get("minimum_size_mm"), " mm"),
+                    ("duty pressure", item.get("required_pressure_bar"), " bar"),
+                    ("duty temperature", item.get("required_temperature_c"), " C"),
+                ):
+                    if value is not None:
+                        unmet.append(f"{label} {value:g}{unit}")
+            results.append(
+                {
+                    "tag": item.get("tag"),
+                    "duty": {k: v for k, v in item.items() if v is not None},
+                    "candidates": matches,
+                    "unmet": unmet,
+                }
+            )
+
+        selected = [
+            r["candidates"][0]["component"]["part_number"] for r in results if r["candidates"]
+        ]
+        envelope = self.compatibility(selected) if len(selected) > 1 else None
+        return {
+            "items": results,
+            "selected_part_numbers": selected,
+            "assembly": envelope,
+            "unresolved": [r["tag"] for r in results if not r["candidates"]],
+            "note": (
+                "Shortlist by published capacity only. Vendor review of trim, authority, "
+                "cavitation, materials and pressure class is still required."
+            ),
+        }
 
     def compatibility(
         self,

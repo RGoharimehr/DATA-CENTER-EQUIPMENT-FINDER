@@ -35,6 +35,11 @@ def _weights(category: Optional[str]) -> dict[str, float]:
 UNVERIFIED_PENALTY = 0.05
 DISPUTED_PENALTY = 0.40
 
+# Above this multiple of a stated requirement the nearest candidate stops being a
+# selection and becomes evidence that the catalogue has no suitable size. A valve 32x
+# the required Kv satisfies the inequality and would be a poor specification.
+GROSS_OVERSIZE_FACTOR = 2.0
+
 
 def _criterion_delta(value: Optional[float], target: Optional[float]) -> Optional[float]:
     """Relative distance from target, or None when the criterion was not requested."""
@@ -109,6 +114,19 @@ def _rating_exclusions(
     return False, warnings
 
 
+def _oversize_delta(available: Optional[float], required: float) -> Optional[float]:
+    """Rank a capacity shortlist by how little it exceeds the requirement.
+
+    Selection against a required value is not a nearest-neighbour problem. A valve
+    with Kv below the required figure cannot pass the design flow at the allocated
+    pressure drop, so it is not a candidate at all; among those that can, the least
+    oversized is the closest fit.
+    """
+    if available is None:
+        return None
+    return max(0.0, available - required) / max(abs(required), 1e-9)
+
+
 def find_closest_components(
     components: Iterable[EquipmentComponent],
     *,
@@ -124,6 +142,10 @@ def find_closest_components(
     target_connection_size_inch: Optional[float] = None,
     required_pressure_bar: Optional[float] = None,
     required_temperature_c: Optional[float] = None,
+    required_cv: Optional[float] = None,
+    required_kv: Optional[float] = None,
+    required_capacity_kw: Optional[float] = None,
+    minimum_size_mm: Optional[float] = None,
     top_n: int = 5,
 ) -> list[MatchResult]:
     if target_capacity_tons is not None and target_capacity_kw is None:
@@ -143,6 +165,62 @@ def find_closest_components(
         excluded, warnings = _rating_exclusions(c, required_pressure_bar, required_temperature_c)
         if excluded:
             continue
+
+        # --- capacity requirements: below the requirement is not a candidate --------
+        required_coefficient = required_cv if required_cv is not None else required_kv
+        oversize: list[float] = []
+
+        if required_coefficient is not None:
+            if c.category.lower() not in FLOW_COEFFICIENT_CATEGORIES:
+                continue
+            available = _coefficient_for_target(c, required_cv, required_kv)
+            if available is None:
+                warnings.append(
+                    "flow coefficient not published; cannot confirm it meets the "
+                    f"required {'Cv (US)' if required_cv is not None else 'Kv'} "
+                    f"of {required_coefficient:g}"
+                )
+            elif available < required_coefficient:
+                continue
+            else:
+                delta = _oversize_delta(available, required_coefficient)
+                if delta is not None:
+                    oversize.append(delta)
+                if available > GROSS_OVERSIZE_FACTOR * required_coefficient:
+                    warnings.append(
+                        f"flow coefficient is {available / required_coefficient:.1f}x the "
+                        "requirement; the catalogue may hold no closer size"
+                    )
+
+        if required_capacity_kw is not None:
+            if c.capacity_kw is None:
+                warnings.append(
+                    f"capacity not published; cannot confirm it meets {required_capacity_kw:g} kW"
+                )
+            elif c.capacity_kw < required_capacity_kw:
+                continue
+            else:
+                delta = _oversize_delta(c.capacity_kw, required_capacity_kw)
+                if delta is not None:
+                    oversize.append(delta)
+                if c.capacity_kw > GROSS_OVERSIZE_FACTOR * required_capacity_kw:
+                    warnings.append(
+                        f"capacity is {c.capacity_kw / required_capacity_kw:.1f}x the "
+                        "requirement; the catalogue may hold no closer size"
+                    )
+
+        if minimum_size_mm is not None:
+            bore = _connection_size_mm(c)
+            if bore is None:
+                warnings.append(
+                    f"nominal size not published; cannot confirm it meets {minimum_size_mm:g} mm"
+                )
+            elif bore < minimum_size_mm:
+                continue
+            else:
+                delta = _oversize_delta(bore, minimum_size_mm)
+                if delta is not None:
+                    oversize.append(delta)
 
         # Each requested criterion contributes its relative error. The score is the
         # weighted mean, so it stays comparable between queries that constrain
@@ -169,7 +247,14 @@ def find_closest_components(
 
         add(_criterion_delta(c.capacity_kw, target_capacity_kw), w["capacity"])
 
-        score = weighted / total_weight if total_weight else 0.0
+        if oversize:
+            # Requirements dominate: a shortlist is ordered by fit above the
+            # requirement, with any preference terms acting only as a tie-break.
+            requirement_score = sum(oversize) / len(oversize)
+            preference_score = weighted / total_weight if total_weight else 0.0
+            score = requirement_score + 0.1 * preference_score
+        else:
+            score = weighted / total_weight if total_weight else 0.0
         if c.verification_status == "disputed":
             score += DISPUTED_PENALTY
         elif c.verification_status != "verified":

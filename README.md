@@ -377,6 +377,45 @@ Rules:
 - If nothing qualifies, the CLI says so and exits non-zero, and the assistant returns
   no matches plus an explicit check. It never quietly relaxes the limit.
 
+## Selecting against a design's duties
+
+`dcef select` and `POST /api/v1/select` take the per-component duties a sizing tool has
+already computed and return catalogue parts that can meet them. This is the intended
+entry point for an upstream design generator.
+
+```bash
+dcef select --duty duty.json          # or --duty - to read stdin
+```
+
+```json
+{"items": [
+  {"tag": "CDU-1", "category": "cdu", "required_capacity_kw": 2006.4, "required_temperature_c": 42},
+  {"tag": "RACK-QD-1", "category": "quick_disconnect", "required_kv": 2.0,
+   "required_pressure_bar": 10, "required_temperature_c": 42}
+]}
+```
+
+**A requirement is an inequality, not a target.** A valve whose Kv is below the required
+figure cannot pass the design flow at its allocated pressure drop, so it is excluded
+rather than offered as a near miss. Among parts that qualify, the shortlist is ordered
+by least oversize, and the score is the mean fractional oversize: `0.09` means 9% above
+the requirement.
+
+- `required_cv` is **Cv (US)**. Cv (US) = 1.156 x Kv, per the Spirax Sarco DCV4
+  datasheet; a catalogue that does not say which Cv it quotes is ambiguous.
+- A part exceeding a requirement by more than 2x is flagged: at that point the nearest
+  candidate is evidence the catalogue holds no suitable size, not a selection.
+- A part that publishes no coefficient, capacity or bore is kept with a warning that the
+  duty could not be confirmed. Unknown is not adequate, and it is not inadequate either.
+- `unresolved` lists the tags nothing could satisfy, and the CLI exits non-zero.
+- `assembly` applies the compatibility engine to the top candidates and reports the
+  governing pressure and temperature.
+
+**This is a capacity shortlist only.** Trim characteristic, valve authority, opening
+position, minimum-flow control, viscosity, cavitation and flashing limits, pressure
+class and materials all remain vendor review. Nothing here asserts a balanced network,
+a pump operating point, or a commissioned installation.
+
 ## Compatibility
 
 `dcef compat` and `POST /api/v1/compat` evaluate a set of part numbers as one assembly.

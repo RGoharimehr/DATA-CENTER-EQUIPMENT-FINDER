@@ -122,3 +122,23 @@ class CompatibilityRequest(_BaseRequestModel):
 def validation_message(exc: ValidationError) -> str:
     first_error = exc.errors()[0]
     return str(first_error.get("msg", "invalid request"))
+
+
+class DutyItem(_BaseRequestModel):
+    tag: str | None = None
+    category: str | None = None
+    component_subtype: str | None = None
+    brand: str | None = None
+    required_cv: float | None = None
+    required_kv: float | None = None
+    required_capacity_kw: float | None = None
+    minimum_size_mm: float | None = None
+    connection_size_mm: float | None = None
+    connection_size_inch: float | None = None
+    required_pressure_bar: float | None = None
+    required_temperature_c: float | None = None
+
+
+class SelectRequest(_BaseRequestModel):
+    items: list[DutyItem]
+    top_n: int = Field(default=3, ge=1, le=50)
