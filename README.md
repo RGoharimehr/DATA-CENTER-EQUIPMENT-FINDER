@@ -175,7 +175,32 @@ Useful package APIs:
 - `write_catalog_csv`
 - `build_database_from_pdf`
 
-### Run the web UI + API
+### Browse the catalogue
+
+```bash
+dcef serve --host 127.0.0.1 --port 8000
+```
+
+The served page browses the catalogue and adds a component to it. Nothing else: there
+is no selection logic in the browser, because the ranking semantics live in one place
+and that place is the Python engine. Search, filter by category, brand or verification
+status, and follow a part number to its cited datasheet.
+
+**Adding a component** runs the same validation as a catalogue build - controlled
+category vocabulary, a required source, a unique part number, and at least one of
+capacity, size or flow coefficient. A row that fails is rejected with its reasons and
+nothing is written. Accepted rows land in `data/vendors/user_added.csv` so a
+hand-entered row is never mistaken for one transcribed during a catalogue build, and
+the catalogue and SQLite database are rebuilt immediately.
+
+The row is marked `unverified` unless you confirm you read the values from the document
+you cited.
+
+```text
+POST /api/v1/components
+```
+
+### Run the API
 
 ```bash
 dcef serve --host 127.0.0.1 --port 8000
@@ -601,7 +626,6 @@ Useful commands:
 dcef build-catalog
 dcef sync-catalogs --limit 5
 dcef build-db
-dcef export-web-catalog
 ```
 
 `sync-catalogs` reports each URL individually and exits non-zero if any failed:
@@ -621,22 +645,3 @@ Note that `.venv` in this directory is the only environment the tooling assumes.
 share this folder between machines with different Python versions, keep separate
 virtual environments outside the repository rather than one `.venv` inside it.
 
-## GitHub Pages website
-
-Static website source:
-
-- `docs/index.html`
-
-Deployment workflow:
-
-- `.github/workflows/pages.yml`
-
-After enabling **Pages (GitHub Actions)** in repository settings, the static site is published from the workflow artifact.
-
-`docs/equipment_catalog.json` is a pre-rendered copy of the packaged catalog. After changing vendor data, regenerate it with:
-
-```bash
-dcef export-web-catalog
-```
-
-`tests/test_catalog_tools.py` fails if it drifts out of sync.

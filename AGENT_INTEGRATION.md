@@ -185,6 +185,12 @@ A result from this tool is a **capacity shortlist**. It does not establish:
 Say "candidate", "shortlist" or "meets the published capacity". Do not say "selected",
 "specified", "verified" or "compliant".
 
+## This tool is headless
+
+There is no selection UI. `dcef serve` serves a catalogue browser and an add-component
+form, and nothing else; ranking, duty selection and reconciliation run through the CLI
+or the JSON API. Present results in your own interface.
+
 ## Discovering the vocabulary
 
 ```bash

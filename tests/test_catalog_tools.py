@@ -32,35 +32,6 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_export_web_catalog_matches_packaged_csv(tmp_path) -> None:
-    import json
-
-    from datacenter_equipment_finder.catalog import EquipmentCatalog
-    from datacenter_equipment_finder.catalog_tools import export_web_catalog
-
-    target = tmp_path / "equipment_catalog.json"
-    count = export_web_catalog(EquipmentCatalog.default_csv_path(), target)
-
-    rows = json.loads(target.read_text(encoding="utf-8"))
-    assert count == len(rows) == len(EquipmentCatalog.from_csv().components)
-    assert rows[0]["part_number"]
-
-
-def test_docs_site_catalog_is_in_sync() -> None:
-    import json
-    from pathlib import Path
-
-    from datacenter_equipment_finder.catalog import EquipmentCatalog
-
-    docs_json = Path(__file__).resolve().parents[1] / "docs" / "equipment_catalog.json"
-    if not docs_json.exists():  # pragma: no cover - docs site is optional
-        return
-    published = json.loads(docs_json.read_text(encoding="utf-8"))
-    assert len(published) == len(EquipmentCatalog.from_csv().components), (
-        "docs/equipment_catalog.json is stale; run 'dcef export-web-catalog'"
-    )
-
-
 def test_sync_reports_every_url_individually(tmp_path) -> None:
     """A bare 'failed: 14' gives no way to tell a dead link from a blocked agent."""
     import csv as _csv
@@ -85,35 +56,3 @@ def test_sync_reports_every_url_individually(tmp_path) -> None:
     assert summary["skipped"] == 1
     assert [r["url"] for r in summary["results"]] == [url]
     assert summary["results"][0]["status"] == "skipped"
-
-
-def test_published_site_does_not_hardcode_the_category_vocabulary() -> None:
-    """The site's category list went stale the moment a category was added, hiding
-    every quick disconnect from the published finder."""
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[1]
-    index = (root / "docs" / "index.html").read_text(encoding="utf-8")
-    app = (root / "docs" / "app.js").read_text(encoding="utf-8")
-
-    select = index.split('<select id="category"')[1].split("</select>")[0]
-    assert select.count("<option") == 1, "category options must be built from the catalog"
-    assert "CATALOG.map((x) => x.category)" in app
-
-
-def test_published_site_ranks_the_same_way_as_the_engine() -> None:
-    from pathlib import Path
-
-    from datacenter_equipment_finder.matching import (
-        DISPUTED_PENALTY,
-        FLOW_COEFFICIENT_CATEGORIES,
-        UNKNOWN_PENALTY,
-        UNVERIFIED_PENALTY,
-    )
-
-    app = (Path(__file__).resolve().parents[1] / "docs" / "app.js").read_text(encoding="utf-8")
-    assert f"UNKNOWN_PENALTY = {UNKNOWN_PENALTY}" in app
-    assert f"UNVERIFIED_PENALTY = {UNVERIFIED_PENALTY}" in app
-    assert f"DISPUTED_PENALTY = {DISPUTED_PENALTY}" in app
-    for category in FLOW_COEFFICIENT_CATEGORIES:
-        assert f'"{category}"' in app, f"{category} missing from the site's flow categories"

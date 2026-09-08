@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
 import sqlite3
 from collections import Counter
 from pathlib import Path
@@ -128,19 +127,58 @@ def build_sqlite_database(csv_path: str | Path, sqlite_path: str | Path) -> int:
     return len(rows)
 
 
-def export_web_catalog(csv_path: str | Path, json_path: str | Path) -> int:
-    """Write the packaged catalog to the JSON file consumed by the static docs site.
 
-    The GitHub Pages build serves a pre-rendered copy of the catalog, which
-    silently goes stale whenever vendor data changes. Regenerating it from the
-    same CSV keeps the published site and the package in step.
+# Rows added through the browse UI land here rather than in a vendor file, so a
+# hand-entered row is never mistaken for one transcribed during a catalogue build.
+USER_ADDED_FILE = "user_added.csv"
+
+
+def append_component(
+    row: dict[str, str],
+    *,
+    vendors_dir: str | Path,
+    catalog_csv: str | Path,
+    sqlite_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Add one component to the catalogue.
+
+    Runs the same validation as a catalogue build: controlled category vocabulary, a
+    required source, something to match on, and unique part numbers. A row that fails
+    is rejected with its reasons and nothing is written.
     """
-    csv_file = Path(csv_path)
-    out_file = Path(json_path)
-    out_file.parent.mkdir(parents=True, exist_ok=True)
+    from .dataset_pipeline import build_catalog_from_vendor_sources, validate_rows
 
-    with csv_file.open("r", encoding="utf-8", newline="") as f:
-        rows = [{name: row.get(name, "") for name in FIELD_NAMES} for row in csv.DictReader(f)]
+    complete = {name: str(row.get(name, "") or "").strip() for name in FIELD_NAMES}
+    if complete["verification_status"] not in {"verified", "unverified", "disputed"}:
+        complete["verification_status"] = "unverified"
 
-    out_file.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
-    return len(rows)
+    errors = validate_rows([complete])
+    existing_parts = set()
+    catalog_path = Path(catalog_csv)
+    if catalog_path.exists():
+        with catalog_path.open("r", encoding="utf-8", newline="") as handle:
+            existing_parts = {
+                (r.get("part_number") or "").strip().lower() for r in csv.DictReader(handle)
+            }
+    if complete["part_number"].lower() in existing_parts:
+        errors.append(f"part_number {complete['part_number']} is already in the catalogue")
+
+    if errors:
+        return {"added": False, "errors": [e.replace("row 1: ", "") for e in errors]}
+
+    target = Path(vendors_dir) / USER_ADDED_FILE
+    is_new = not target.exists()
+    with target.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELD_NAMES)
+        if is_new:
+            writer.writeheader()
+        writer.writerow(complete)
+
+    build_errors = build_catalog_from_vendor_sources(vendors_dir, catalog_csv)
+    if build_errors:
+        return {"added": False, "errors": build_errors}
+    rows = None
+    if sqlite_path is not None:
+        rows = build_sqlite_database(catalog_csv, sqlite_path)
+
+    return {"added": True, "part_number": complete["part_number"], "catalog_rows": rows}

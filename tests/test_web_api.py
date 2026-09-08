@@ -136,13 +136,15 @@ class WebApiTests(unittest.TestCase):
             self._get_json(f"{API_PREFIX}/components?limit=0")
         self.assertEqual(ctx.exception.code, 400)
 
-    def test_index_includes_api_key_support_for_browser_requests(self):
+    def test_index_is_a_browse_page_with_no_selection_logic(self):
+        # Selection semantics live in one place: the Python engine. The served page
+        # browses the catalogue and adds to it; it does not rank anything.
         html = self._get_text("/")
         self.assertIn('id="api-key"', html)
-        self.assertIn('id="conn-size-mm"', html)
-        self.assertIn('id="conn-size-inch"', html)
-        self.assertIn("'X-API-Key': apiKey", html)
-        self.assertIn("localStorage.getItem('dcef-api-key')", html)
+        self.assertIn('id="rows"', html)
+        self.assertIn("/api/v1/components", html)
+        for absent in ("UNKNOWN_PENALTY", "oversize", "find?category"):
+            self.assertNotIn(absent, html)
 
 
 class WebApiAuthAndRateLimitTests(unittest.TestCase):
@@ -198,3 +200,128 @@ class WebApiAuthAndRateLimitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AddComponentTests(unittest.TestCase):
+    """Adding a row through the browse page runs the catalogue's own validation."""
+
+    def _add(self, **overrides):
+        import tempfile
+        from pathlib import Path
+
+        from datacenter_equipment_finder.catalog import EquipmentCatalog
+        from datacenter_equipment_finder.catalog_tools import append_component
+
+        row = {
+            "part_number": "TEST-VALVE-1", "brand": "Acme", "category": "valve",
+            "component_name": "Test valve", "flow_coefficient_type": "Kv",
+            "flow_coefficient_value": "12.5", "source_catalog": "Acme datasheet A-1",
+            "datasheet_url": "https://example.com/a-1.pdf",
+        }
+        row.update(overrides)
+        row = {k: v for k, v in row.items() if v is not None}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vendors = root / "vendors"
+            vendors.mkdir()
+            source = EquipmentCatalog.default_csv_path().read_text(encoding="utf-8")
+            (vendors / "seed.csv").write_text(source, encoding="utf-8")
+            catalog = root / "equipment_catalog.csv"
+            catalog.write_text(source, encoding="utf-8")
+            return append_component(row, vendors_dir=vendors, catalog_csv=catalog)
+
+    def test_a_valid_component_is_added(self):
+        outcome = self._add()
+        self.assertTrue(outcome["added"], outcome)
+        self.assertEqual(outcome["part_number"], "TEST-VALVE-1")
+
+    def test_an_unknown_category_is_rejected(self):
+        outcome = self._add(category="coolant_distribution_unit")
+        self.assertFalse(outcome["added"])
+        self.assertTrue(any("unknown category" in e for e in outcome["errors"]), outcome)
+
+    def test_a_row_with_nothing_to_match_on_is_rejected(self):
+        outcome = self._add(flow_coefficient_value=None)
+        self.assertFalse(outcome["added"])
+        self.assertTrue(any("nothing to match on" in e for e in outcome["errors"]), outcome)
+
+    def test_a_row_without_a_source_is_rejected(self):
+        outcome = self._add(source_catalog=None)
+        self.assertFalse(outcome["added"])
+        self.assertTrue(any("missing source_catalog" in e for e in outcome["errors"]), outcome)
+
+    def test_a_duplicate_part_number_is_rejected(self):
+        outcome = self._add(part_number="009L8620")
+        self.assertFalse(outcome["added"])
+        self.assertTrue(any("already in the catalogue" in e for e in outcome["errors"]), outcome)
+
+    def test_an_unrecognised_verification_status_falls_back_to_unverified(self):
+        outcome = self._add(verification_status="definitely-fine")
+        self.assertTrue(outcome["added"], outcome)
+
+
+class PostRouteTests(unittest.TestCase):
+    """The POST routes are reachable over HTTP.
+
+    A route added below do_POST's fall-through 404 is dead code that unit tests,
+    ruff and mypy all pass over. /api/v1/select shipped that way and was never
+    reachable, so these exercise the real server.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        service = EquipmentService.default()
+        handler = create_handler(service, config=ServerConfig(api_key=None, rate_limit_per_minute=200))
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=5)
+
+    def _post(self, path, payload):
+        request = Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            method="POST",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urlopen(request) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+
+    def test_select_is_reachable(self):
+        status, payload = self._post(
+            f"{API_PREFIX}/select",
+            {"items": [{"tag": "T1", "category": "valve", "required_cv": 20.0}]},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["data"]["items"][0]["candidates"])
+
+    def test_add_component_is_reachable_and_validates(self):
+        status, payload = self._post(
+            f"{API_PREFIX}/components",
+            {"part_number": "X", "brand": "Acme", "category": "cooling_unit",
+             "component_name": "x", "source_catalog": "y", "flow_coefficient_value": "1"},
+        )
+        self.assertEqual(status, 422)
+        self.assertFalse(payload["data"]["added"])
+        self.assertTrue(any("unknown category" in e for e in payload["data"]["errors"]))
+
+    def test_every_advertised_post_route_answers(self):
+        # The openapi listing must not advertise a route the handler never reaches.
+        with urlopen(f"http://127.0.0.1:{self.port}{API_PREFIX}/openapi.json") as response:
+            spec = json.loads(response.read().decode("utf-8"))["data"]
+        for route, methods in spec["paths"].items():
+            if "post" not in methods:
+                continue
+            status, _ = self._post(route, {})
+            self.assertNotEqual(status, 404, f"{route} is advertised but not routed")
