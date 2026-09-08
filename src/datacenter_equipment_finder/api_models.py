@@ -101,6 +101,8 @@ class CompatibilityRequest(_BaseRequestModel):
     required_material: str | None = None
     required_connection_standard: str | None = None
     required_coolant: str | None = None
+    required_pressure_bar: float | None = None
+    required_temperature_c: float | None = None
 
     @field_validator("part_numbers")
     @classmethod

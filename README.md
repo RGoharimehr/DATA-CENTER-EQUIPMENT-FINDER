@@ -337,6 +337,38 @@ Rules:
 - If nothing qualifies, the CLI says so and exits non-zero, and the assistant returns
   no matches plus an explicit check. It never quietly relaxes the limit.
 
+## Compatibility
+
+`dcef compat` and `POST /api/v1/compat` evaluate a set of part numbers as one assembly.
+
+```bash
+dcef compat "Hansen UQD06" 009L8622 --required-pressure-bar 15
+dcef compat 023Z5068 C-609-S --required-coolant "Water/Glycol"
+```
+
+The response separates three things:
+
+- `reasons` - genuine incompatibilities. Non-empty means `is_compatible` is false.
+- `notes` - advisories and derived facts that do not invalidate the selection.
+- `limits` - the assembly envelope. **The weakest component governs**, and the report
+  names it: `Assembly is limited to 6.9 bar by Hansen UQD06`.
+
+What it checks:
+
+- **Duty**: `required_pressure_bar` and `required_temperature_c` are compared against
+  every part, so the lowest-rated one cannot hide behind the others.
+- **End connections**: compared by joint family across *all* categories, so ODF and
+  ODS match, tri-clamp and hygienic flange match, and ORB against ODF solder does not.
+- **Wetted materials**: compared by family. `316L Stainless Steel`, `SS303` and
+  `Stainless Steel` are the same material family; a copper part in a carbon-steel loop
+  raises a galvanic advisory rather than a false mismatch.
+- **Coolant**: compared by family, so `Water/EGW/PGW` satisfies a `Water/Glycol`
+  requirement while `Ammonia` does not.
+- **Provenance**: unverified and disputed parts in the selection are called out.
+
+The CLI exits non-zero when a selection is incompatible or a part number is not in the
+catalog, so it can gate a build.
+
 ## Match scores
 
 A score is the weighted mean relative error across the criteria you actually

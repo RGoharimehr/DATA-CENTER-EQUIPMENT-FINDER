@@ -121,6 +121,8 @@ class EquipmentService:
         required_material: str | None = None,
         required_connection_standard: str | None = None,
         required_coolant: str | None = None,
+        required_pressure_bar: float | None = None,
+        required_temperature_c: float | None = None,
     ) -> dict[str, Any]:
         selected = [
             c for c in self.catalog.components if c.part_number.lower() in {p.lower() for p in part_numbers}
@@ -131,10 +133,14 @@ class EquipmentService:
             required_material=required_material,
             required_connection_standard=required_connection_standard,
             required_coolant=required_coolant,
+            required_pressure_bar=required_pressure_bar,
+            required_temperature_c=required_temperature_c,
         )
         return {
             "is_compatible": report.is_compatible,
             "reasons": report.reasons,
+            "notes": report.notes,
+            "limits": report.limits,
             "selected_count": len(selected),
             "requested_count": len(part_numbers),
         }

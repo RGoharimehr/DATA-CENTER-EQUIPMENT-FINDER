@@ -41,6 +41,10 @@ def _build_parser() -> argparse.ArgumentParser:
     c.add_argument("--required-material")
     c.add_argument("--required-connection-standard")
     c.add_argument("--required-coolant")
+    c.add_argument("--required-pressure-bar", type=float, default=None,
+                   help="System pressure the whole assembly must withstand")
+    c.add_argument("--required-temperature-c", type=float, default=None,
+                   help="Coolant temperature the whole assembly must withstand")
 
     e = sub.add_parser("explain", help="Explain a property or category")
     e.add_argument("--property", dest="property_name")
@@ -137,11 +141,18 @@ def main() -> int:
             required_material=args.required_material,
             required_connection_standard=args.required_connection_standard,
             required_coolant=args.required_coolant,
+            required_pressure_bar=args.required_pressure_bar,
+            required_temperature_c=args.required_temperature_c,
         )
+        missing = {p.lower() for p in args.part_numbers} - {c.part_number.lower() for c in selected}
+        for part in sorted(missing):
+            print(f"! not in catalog: {part}")
         print(f"compatible={report.is_compatible}")
         for reason in report.reasons:
             print(f"- {reason}")
-        return 0
+        for note in report.notes:
+            print(f"  note: {note}")
+        return 0 if report.is_compatible and not missing else 1
 
     if args.command == "explain":
         if args.property_name:

@@ -405,6 +405,8 @@ def create_handler(service: EquipmentService, config: ServerConfig | None = None
                     required_material=compat_request.required_material,
                     required_connection_standard=compat_request.required_connection_standard,
                     required_coolant=compat_request.required_coolant,
+                    required_pressure_bar=compat_request.required_pressure_bar,
+                    required_temperature_c=compat_request.required_temperature_c,
                 )
                 _json_response(self, _envelope_ok(report), 200)
             except json.JSONDecodeError as exc:
