@@ -273,6 +273,12 @@ document. Treat its output as a draft to review, not as catalog-ready data.
 The command exits 2 with a plain message if the file is missing, is not a PDF (a
 downloaded consent wall is the usual cause), or if no local model is configured.
 
+Extraction on a local model is slow - minutes per chunk on an 8B model, and the
+first call also pays the cost of loading the model into memory. The wait defaults to
+600 seconds; raise it with `--timeout` or `DCEF_PDF_AI_TIMEOUT_SECONDS`. This is
+separate from `DCEF_AI_TIMEOUT_SECONDS`, which governs the much shorter assistant
+query parsing.
+
 Optional page limit:
 
 ```bash

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from .assistant import run_assistant_query
+from dataclasses import replace
+
+from .assistant import default_assistant_config, run_assistant_query
 from .catalog import EquipmentCatalog
 from .catalog_tools import build_sqlite_database, download_catalogs, export_web_catalog
 from .compatibility import check_compatibility
@@ -82,6 +84,8 @@ def _build_parser() -> argparse.ArgumentParser:
     pdf.add_argument("--db-path", required=True)
     pdf.add_argument("--csv-path", default=None)
     pdf.add_argument("--max-pages", type=int, default=None)
+    pdf.add_argument("--timeout", type=int, default=None,
+                     help="Seconds to wait for the local model (default 600, or DCEF_PDF_AI_TIMEOUT_SECONDS)")
     pdf.add_argument("--strict", action="store_true",
                      help="Fail if any extracted row is unusable, instead of keeping the good ones")
 
@@ -229,6 +233,11 @@ def main() -> int:
                 csv_path=args.csv_path,
                 max_pages=args.max_pages,
                 strict=args.strict,
+                config=(
+                    replace(default_assistant_config(), pdf_timeout_seconds=args.timeout)
+                    if args.timeout
+                    else None
+                ),
             )
         except (FileNotFoundError, ValueError) as exc:
             print(f"build-db-from-pdf failed: {exc}")

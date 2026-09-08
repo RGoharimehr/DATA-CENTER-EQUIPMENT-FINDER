@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import socket
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -123,9 +124,17 @@ def _request_local_model(prompt: str, config: AssistantConfig) -> Any:
 
     req = Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
     try:
-        with urlopen(req, timeout=config.timeout_seconds) as resp:
+        with urlopen(req, timeout=config.pdf_timeout_seconds) as resp:
             response_data = json.loads(resp.read().decode("utf-8"))
-    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except (TimeoutError, socket.timeout) as exc:
+        raise ValueError(
+            f"The local model at {endpoint} did not answer within "
+            f"{config.pdf_timeout_seconds}s. Extraction is slow on a local model, and "
+            "the first call also pays the cost of loading it into memory. Raise the "
+            "limit with DCEF_PDF_AI_TIMEOUT_SECONDS, or shorten the job with "
+            f"--max-pages. ({exc})"
+        ) from exc
+    except (URLError, json.JSONDecodeError) as exc:
         raise ValueError(f"Local model request failed: {exc}") from exc
 
     if isinstance(response_data, dict):

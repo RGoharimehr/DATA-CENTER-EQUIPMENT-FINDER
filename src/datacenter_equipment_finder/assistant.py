@@ -42,7 +42,12 @@ class AssistantConfig:
     local_endpoint: str | None = None
     local_model: str | None = None
     local_api_key: str | None = None
+    # Tuned for parsing a one-line query.
     timeout_seconds: int = 12
+    # Whole-document extraction is a different job: a local 8B model loading into
+    # memory and then emitting JSON for a page of catalog text takes minutes, not
+    # seconds, and the first call after a pull pays the load cost as well.
+    pdf_timeout_seconds: int = 600
 
 
 def default_assistant_config() -> AssistantConfig:
@@ -53,6 +58,7 @@ def default_assistant_config() -> AssistantConfig:
         local_model=os.environ.get("DCEF_LOCAL_AI_MODEL"),
         local_api_key=os.environ.get("DCEF_LOCAL_AI_API_KEY"),
         timeout_seconds=int(os.environ.get("DCEF_AI_TIMEOUT_SECONDS", "12")),
+        pdf_timeout_seconds=int(os.environ.get("DCEF_PDF_AI_TIMEOUT_SECONDS", "600")),
     )
 
 

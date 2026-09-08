@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -171,3 +172,45 @@ def test_prompt_tells_the_model_what_to_do_without_a_sku() -> None:
     prompt = _pdf_prompt("some catalog text")
     assert "product designation" in prompt
     assert "Never invent a code" in prompt
+
+
+class _SlowModel(_StubModel):
+    def do_POST(self) -> None:  # noqa: N802
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        time.sleep(1.5)
+        body = json.dumps({"response": json.dumps({"rows": [ROW]})}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture()
+def slow_model():
+    server = HTTPServer(("127.0.0.1", 0), _SlowModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}/api/generate"
+    server.shutdown()
+    server.server_close()
+
+
+def test_pdf_extraction_does_not_use_the_query_parser_timeout(tmp_path: Path, slow_model: str) -> None:
+    # The 12s default belongs to one-line query parsing. Extraction reused it, so a
+    # local model that needed longer failed with a bare "timed out".
+    config = AssistantConfig(local_endpoint=slow_model, local_model="stub", timeout_seconds=1)
+    assert config.pdf_timeout_seconds >= 600
+    summary = build_database_from_pdf(
+        write_text_pdf(tmp_path / "v.pdf", ["catalog"]),
+        tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv", config=config,
+    )
+    assert summary["rows"] == 1
+
+
+def test_a_timeout_says_how_to_raise_it(tmp_path: Path, slow_model: str) -> None:
+    config = AssistantConfig(local_endpoint=slow_model, local_model="stub", pdf_timeout_seconds=1)
+    with pytest.raises(ValueError, match="DCEF_PDF_AI_TIMEOUT_SECONDS"):
+        build_database_from_pdf(
+            write_text_pdf(tmp_path / "v.pdf", ["catalog"]),
+            tmp_path / "v.sqlite", csv_path=tmp_path / "v.csv", config=config,
+        )
