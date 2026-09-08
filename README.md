@@ -397,6 +397,11 @@ with the decision left unset. A design tool shows both columns and lets the engi
 choose per component; `needs_external_sourcing` lists the tags with no catalogue answer,
 and `ready_to_publish` stays false until every row is decided.
 
+Decisions are keyed on a `duty_fingerprint`, not the configuration hash, so they
+survive an Apply that did not change the requirement and are dropped by one that
+did. A carried decision is also re-validated against the current catalogue, so a
+part that has since been corrected or disputed does not silently stay selected.
+
 Required coefficients apply only to balancing and control valves. Isolation and check
 valves are on/off and are selected on bore, pressure class and material, so their duties
 carry no `required_cv`.

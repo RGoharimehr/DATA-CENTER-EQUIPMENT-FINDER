@@ -47,6 +47,37 @@ there is none. `needs_external_sourcing` lists the second kind: those tags have 
 catalogue answer and the engineer must find a component from vendor literature.
 `ready_to_publish` stays false while `undecided` is non-empty.
 
+### Decisions survive an Apply, unless the duty changed
+
+```bash
+dcef reconcile --sizing sizing.json --schedule valve_schedule.csv \
+  --decisions decisions.json
+```
+
+Each row carries a `duty_fingerprint` — a digest of the fields that decide whether a
+part still fits: category, loop, required coefficient, minimum bore, material, and the
+duty pressure and temperature. Geometry, tags and the applied configuration hash are
+deliberately excluded. A 0.25 m pod move changes the hash and changes nothing about
+what part fits, so its decisions carry forward.
+
+Pass the previous decisions back on the next run and each one is re-checked:
+
+- **fingerprint matches** → carried forward, `action_required: decided`, listed in
+  `carried_forward`.
+- **duty changed** → dropped, with `decision_invalidated` saying so, and the tag
+  returns to `undecided`.
+- **the chosen part no longer meets the duty**, or has since been marked `disputed` →
+  dropped with that reason. The catalogue can move under a decision, so a carried
+  choice is re-validated against the current catalogue every time.
+
+`ready_to_publish` is true only when nothing is undecided. Never carry a decision
+forward yourself by re-attaching it after the tool dropped it.
+
+Build a decision with `record_decision(row, choice)` where `choice` is `catalogue`
+(take the suggested part), `calculated` (keep the generator's requirement and source
+the part separately), or `external` (a part found outside this catalogue). Collect them
+with `decisions_from_rows(report["rows"])`.
+
 **A catalogue answer never removes the sourcing step.** Even a resolved row is a
 capacity shortlist. The engineer confirms it against the vendor's own documentation
 before the design is published.

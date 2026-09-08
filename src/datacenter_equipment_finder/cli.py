@@ -69,6 +69,8 @@ def _build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--sizing", required=True,
                      help="Preliminary sizing JSON, or - for stdin; uses its valve_capacities")
     rec.add_argument("--schedule", help="Valve schedule CSV, for loop, material and bore")
+    rec.add_argument("--decisions",
+                     help="Previous decisions JSON, carried forward where the duty is unchanged")
     rec.add_argument("--top-n", type=int, default=3)
 
     sub.add_parser("schema", help="Show the categories, subtypes and brands available")
@@ -221,8 +223,13 @@ def main() -> int:
                 schedule_rows = list(csv.DictReader(handle))
 
         duties = duties_from_sizing(capacities, schedule_rows)
+        previous = None
+        if args.decisions:
+            previous = json.loads(Path(args.decisions).read_text(encoding="utf-8"))
         service = EquipmentService.default()
-        reconciliation = reconcile(duties, service.select_for_duty(duties, top_n=args.top_n))
+        reconciliation = reconcile(
+            duties, service.select_for_duty(duties, top_n=args.top_n), previous
+        )
         print(json.dumps(reconciliation, indent=2))
         return 1 if reconciliation["needs_external_sourcing"] else 0
 

@@ -162,3 +162,94 @@ def test_the_selection_core_needs_no_optional_dependencies() -> None:
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
+
+
+# --- decisions persist across Apply, keyed on the duty ----------------------------
+
+def _reconciled(duties, previous=None):
+    from datacenter_equipment_finder.rd_studio import reconcile
+
+    return reconcile(duties, _service().select_for_duty(duties), previous)
+
+
+def _decided(duty, choice="catalogue"):
+    from datacenter_equipment_finder.rd_studio import decisions_from_rows, record_decision
+
+    report = _reconciled([duty])
+    row = report["rows"][0]
+    row["decision"] = record_decision(row, choice)
+    return decisions_from_rows(report["rows"])
+
+
+BASE_DUTY = {
+    "tag": "TCS-R01-BV-001", "loop": "TCS", "category": "valve",
+    "schedule_type": "balancing_valve", "required_cv": 92.0, "minimum_size_mm": 127.0,
+}
+
+
+def test_a_decision_survives_an_apply_that_did_not_change_the_duty() -> None:
+    # A 0.25 m pod move changes the applied hash and changes nothing about what part
+    # fits. Wiping 126 valve decisions on every Apply would make the review unusable.
+    previous = _decided(BASE_DUTY)
+    again = _reconciled([dict(BASE_DUTY)], previous)
+    row = again["rows"][0]
+    assert row["decision"] is not None
+    assert row["action_required"] == "decided"
+    assert again["carried_forward"] == ["TCS-R01-BV-001"]
+    assert again["ready_to_publish"] is True
+
+
+def test_a_decision_is_dropped_when_the_duty_changes() -> None:
+    previous = _decided(BASE_DUTY)
+    changed = _reconciled([dict(BASE_DUTY, required_cv=420.0)], previous)
+    row = changed["rows"][0]
+    assert row["decision"] is None
+    assert "the duty changed" in row["decision_invalidated"]
+    assert changed["ready_to_publish"] is False
+
+
+def test_a_decision_is_dropped_when_the_chosen_part_no_longer_meets_the_duty() -> None:
+    # The catalogue can move under a decision: a row gets corrected, or superseded.
+    from datacenter_equipment_finder.rd_studio import duty_fingerprint
+
+    stale = {
+        "TCS-R01-BV-001": {
+            "choice": "catalogue",
+            "part_number": "NO-SUCH-PART",
+            "duty_fingerprint": duty_fingerprint(BASE_DUTY),
+        }
+    }
+    report = _reconciled([dict(BASE_DUTY)], stale)
+    row = report["rows"][0]
+    assert row["decision"] is None
+    assert "no longer meets this duty" in row["decision_invalidated"]
+
+
+def test_geometry_and_hashes_do_not_enter_the_fingerprint() -> None:
+    from datacenter_equipment_finder.rd_studio import duty_fingerprint
+
+    moved = dict(BASE_DUTY, edge_id="E999", allocated_dp_pa=31000, design_flow_m3_s=0.02)
+    assert duty_fingerprint(moved) == duty_fingerprint(BASE_DUTY)
+
+
+def test_rounding_noise_does_not_invalidate_a_decision() -> None:
+    from datacenter_equipment_finder.rd_studio import duty_fingerprint
+
+    recomputed = dict(BASE_DUTY, required_cv=92.0000000001)
+    assert duty_fingerprint(recomputed) == duty_fingerprint(BASE_DUTY)
+
+
+def test_keeping_the_calculated_requirement_is_a_valid_decision() -> None:
+    previous = _decided(BASE_DUTY, choice="calculated")
+    report = _reconciled([dict(BASE_DUTY)], previous)
+    assert report["rows"][0]["decision"]["choice"] == "calculated"
+    assert report["ready_to_publish"] is True
+
+
+def test_a_catalogue_choice_needs_a_part_number() -> None:
+    import pytest
+
+    from datacenter_equipment_finder.rd_studio import record_decision
+
+    with pytest.raises(ValueError, match="part number"):
+        record_decision({"duty_fingerprint": "abc", "suggested": None}, "catalogue")

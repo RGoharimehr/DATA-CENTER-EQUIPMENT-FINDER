@@ -17,6 +17,7 @@ Two things this deliberately does not do:
 from __future__ import annotations
 
 import csv
+import hashlib
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
@@ -193,9 +194,73 @@ def duties_from_sizing(
     return duties
 
 
+# The fields that decide whether a previous choice is still valid. Geometry moves,
+# renamed tags and configuration hashes are deliberately absent: a 0.25 m pod move
+# changes the applied hash and changes nothing about what part fits.
+_DUTY_FIELDS = (
+    "category",
+    "component_subtype",
+    "schedule_type",
+    "loop",
+    "required_cv",
+    "required_kv",
+    "required_capacity_kw",
+    "minimum_size_mm",
+    "required_material",
+    "required_pressure_bar",
+    "required_temperature_c",
+)
+
+
+def duty_fingerprint(duty: dict[str, Any]) -> str:
+    """A short digest of everything that determines whether a part still fits.
+
+    Keyed on the requirement rather than the configuration hash, so a decision
+    survives an Apply that did not change the duty, and does not survive one that did.
+    Numbers are rounded before hashing so that floating-point noise in a recomputed
+    but unchanged duty does not invalidate a decision.
+    """
+    parts: list[str] = []
+    for field in _DUTY_FIELDS:
+        value = duty.get(field)
+        if isinstance(value, (int, float)):
+            parts.append(f"{field}={round(float(value), 6):g}")
+        elif value is not None:
+            parts.append(f"{field}={value}")
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _decision_still_valid(
+    decision: dict[str, Any],
+    duty: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> tuple[bool, str | None]:
+    """Re-check a carried-forward decision against the current catalogue.
+
+    A decision can be invalidated without the duty changing: the catalogue row may
+    have been corrected, marked disputed, or removed since the choice was made.
+    """
+    if decision.get("choice") != "catalogue":
+        return True, None
+
+    part = decision.get("part_number")
+    match = next((c for c in candidates if c["component"]["part_number"] == part), None)
+    if match is None:
+        return False, (
+            f"{part} no longer meets this duty in the current catalogue; re-select"
+        )
+    if match["component"].get("verification_status") == "disputed":
+        return False, (
+            f"{part} is now marked disputed: vendor literature does not support the "
+            "entry; re-select"
+        )
+    return True, None
+
+
 def reconcile(
     duties: list[dict[str, Any]],
     selection: dict[str, Any],
+    previous_decisions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Pair what the generator calculated with what the catalogue offers.
 
@@ -205,10 +270,11 @@ def reconcile(
     and a tag the catalogue cannot answer needs a component sourced elsewhere.
     """
     by_tag = {item.get("tag"): item for item in selection.get("items", [])}
+    carried = previous_decisions or {}
     rows: list[dict[str, Any]] = []
 
     for duty in duties:
-        tag = duty.get("tag")
+        tag = str(duty.get("tag") or "")
         result = by_tag.get(tag, {})
         candidates = result.get("candidates", [])
         best = candidates[0] if candidates else None
@@ -242,32 +308,104 @@ def reconcile(
                 "alternatives": [c["component"]["part_number"] for c in candidates[1:]],
             }
 
-        rows.append(
-            {
-                "tag": tag,
-                "loop": duty.get("loop"),
-                "schedule_type": duty.get("schedule_type"),
-                "calculated": {k: v for k, v in calculated.items() if v is not None},
-                "suggested": suggested,
-                # Unset on purpose. The engineer picks per component.
-                "decision": None,
-                "action_required": (
-                    "choose" if suggested is not None else "source_externally"
-                ),
-                "unmet": result.get("unmet", []),
-            }
-        )
+        fingerprint = duty_fingerprint(duty)
+        decision = carried.get(tag)
+        stale_reason: str | None = None
+
+        if decision is not None:
+            if decision.get("duty_fingerprint") != fingerprint:
+                stale_reason = (
+                    "the duty changed since this was decided; review it against the "
+                    "new requirement"
+                )
+                decision = None
+            else:
+                still_valid, reason = _decision_still_valid(decision, duty, candidates)
+                if not still_valid:
+                    stale_reason = reason
+                    decision = None
+
+        if decision is not None:
+            action = "decided"
+        elif suggested is not None:
+            action = "choose"
+        else:
+            action = "source_externally"
+
+        row: dict[str, Any] = {
+            "tag": tag,
+            "loop": duty.get("loop"),
+            "schedule_type": duty.get("schedule_type"),
+            "duty_fingerprint": fingerprint,
+            "calculated": {k: v for k, v in calculated.items() if v is not None},
+            "suggested": suggested,
+            # Unset unless a previous decision survived. The engineer picks per component.
+            "decision": decision,
+            "action_required": action,
+            "unmet": result.get("unmet", []),
+        }
+        if stale_reason:
+            row["decision_invalidated"] = stale_reason
+        rows.append(row)
 
     needs_sourcing = [r["tag"] for r in rows if r["action_required"] == "source_externally"]
+    undecided = [r["tag"] for r in rows if r["decision"] is None]
+    invalidated = [r["tag"] for r in rows if r.get("decision_invalidated")]
     return {
         "rows": rows,
         "needs_external_sourcing": needs_sourcing,
-        "undecided": [r["tag"] for r in rows if r["decision"] is None],
-        "ready_to_publish": False,
+        "undecided": undecided,
+        "invalidated": invalidated,
+        "carried_forward": [
+            r["tag"] for r in rows if r["decision"] is not None and r["tag"] in carried
+        ],
+        "ready_to_publish": not undecided,
         "note": (
             "Every row needs a decision before the design is published. A suggested "
             "part is a capacity shortlist, not a specification; a tag listed under "
             "needs_external_sourcing has no catalogue answer and requires a component "
-            "sourced from vendor literature."
+            "sourced from vendor literature. Decisions are keyed on the duty, so they "
+            "survive an Apply that did not change the requirement and are dropped by "
+            "one that did."
         ),
     }
+
+
+def decisions_from_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Collect the decisions from a reviewed report, ready to pass to the next run."""
+    return {
+        row["tag"]: row["decision"]
+        for row in rows
+        if row.get("decision") is not None and row.get("tag")
+    }
+
+
+def record_decision(
+    row: dict[str, Any],
+    choice: str,
+    *,
+    part_number: str | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Build a decision for one reviewed row.
+
+    ``choice`` is "catalogue" (take the suggested part), "calculated" (keep the
+    generator's requirement and source the part separately), or "external" (a part
+    found outside this catalogue).
+    """
+    if choice not in {"catalogue", "calculated", "external"}:
+        raise ValueError(f"unknown choice {choice!r}")
+    if choice == "catalogue" and not part_number:
+        suggested = row.get("suggested") or {}
+        part_number = suggested.get("part_number")
+        if not part_number:
+            raise ValueError("a catalogue choice needs a part number")
+    decision: dict[str, Any] = {
+        "choice": choice,
+        "duty_fingerprint": row["duty_fingerprint"],
+    }
+    if part_number:
+        decision["part_number"] = part_number
+    if note:
+        decision["note"] = note
+    return decision
