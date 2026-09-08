@@ -16,8 +16,25 @@ from .catalog_tools import build_sqlite_database
 from .dataset_pipeline import validate_rows
 
 
-def extract_pdf_text(pdf_path: str | Path, *, max_pages: int | None = None) -> str:
+def _validate_pdf_path(pdf_path: str | Path) -> Path:
+    """Cheap checks that run before anything expensive, so the first error a user
+    sees is the one that actually applies to their command."""
     path = Path(pdf_path)
+    if not path.exists():
+        raise FileNotFoundError(f"PDF not found: {path}")
+    if path.is_dir():
+        raise ValueError(f"Expected a PDF file but got a directory: {path}")
+    with path.open("rb") as handle:
+        if handle.read(5) != b"%PDF-":
+            raise ValueError(
+                f"{path} is not a PDF. A datasheet URL that answers with an HTML "
+                "consent wall is the usual cause; re-fetch it with 'dcef sync-catalogs'."
+            )
+    return path
+
+
+def extract_pdf_text(pdf_path: str | Path, *, max_pages: int | None = None) -> str:
+    path = _validate_pdf_path(pdf_path)
     reader = PdfReader(str(path))
     pages = reader.pages[: max_pages or len(reader.pages)]
     text = "\n\n".join((page.extract_text() or "").strip() for page in pages).strip()
@@ -133,6 +150,7 @@ def _normalize_value(value: Any) -> str:
 
 def _normalize_row(row: dict[str, Any]) -> dict[str, str]:
     normalized = {field: _normalize_value(row.get(field)) for field in FIELD_NAMES}
+    normalized["verification_status"] = "unverified"
     normalized["category"] = normalized["category"].lower().replace(" ", "_")
     normalized["component_subtype"] = normalized["component_subtype"].lower().replace(" ", "_")
     coeff = normalized["flow_coefficient_type"].lower()
@@ -179,6 +197,16 @@ def extract_catalog_rows_from_pdf(
     max_chars_per_chunk: int = 12000,
 ) -> list[dict[str, str]]:
     cfg = config or default_assistant_config()
+    # Validate the input before complaining about configuration: a mistyped filename
+    # should say so, not send the user off to install a model they may already have.
+    _validate_pdf_path(pdf_path)
+    if not cfg.local_endpoint or not cfg.local_model:
+        raise ValueError(
+            "PDF extraction needs a local model. Set DCEF_LOCAL_AI_ENDPOINT and "
+            "DCEF_LOCAL_AI_MODEL, for example:\n"
+            "  export DCEF_LOCAL_AI_ENDPOINT=http://127.0.0.1:11434/api/generate\n"
+            "  export DCEF_LOCAL_AI_MODEL=llama3.1"
+        )
     text = extract_pdf_text(pdf_path, max_pages=max_pages)
     chunks = _chunk_text(text, max_chars=max_chars_per_chunk)
     rows: list[dict[str, str]] = []

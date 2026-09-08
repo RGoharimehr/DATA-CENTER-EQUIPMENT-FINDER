@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from pdf_fixture import write_text_pdf
+
 from datacenter_equipment_finder.assistant import AssistantConfig
 from datacenter_equipment_finder.pdf_catalog import build_database_from_pdf, extract_catalog_rows_from_pdf, extract_pdf_text
 
@@ -31,11 +33,24 @@ class _FakeResponse:
         return json.dumps(self._payload).encode("utf-8")
 
 
+_SAMPLE_DIR = tempfile.mkdtemp(prefix="dcef-pdf-tests-")
+
+
+def _sample_pdf() -> str:
+    """A real PDF on disk, so the parsing path is genuinely exercised."""
+    return str(
+        write_text_pdf(
+            Path(_SAMPLE_DIR) / "sample.pdf",
+            ["Parker valve catalog", "S4A 20 mm", "C-609-S 1-1/8 in ODF"],
+        )
+    )
+
+
 class PdfCatalogTests(unittest.TestCase):
     def test_extract_pdf_text_reads_pages(self):
         fake_reader = type("Reader", (), {"pages": [_FakePage("Page 1"), _FakePage("Page 2")]})()
         with patch("datacenter_equipment_finder.pdf_catalog.PdfReader", return_value=fake_reader):
-            text = extract_pdf_text("/tmp/sample.pdf")
+            text = extract_pdf_text(_sample_pdf())
         self.assertIn("Page 1", text)
         self.assertIn("Page 2", text)
 
@@ -80,7 +95,7 @@ class PdfCatalogTests(unittest.TestCase):
             return_value=_FakeResponse(payload),
         ):
             rows = extract_catalog_rows_from_pdf(
-                "/tmp/sample.pdf",
+                _sample_pdf(),
                 config=AssistantConfig(local_endpoint="http://127.0.0.1:11434/api/generate", local_model="llama3.1"),
             )
         self.assertEqual(len(rows), 1)
@@ -132,7 +147,7 @@ class PdfCatalogTests(unittest.TestCase):
                 return_value=_FakeResponse(payload),
             ):
                 summary = build_database_from_pdf(
-                    "/tmp/sample.pdf",
+                    _sample_pdf(),
                     db_path,
                     csv_path=csv_path,
                     config=AssistantConfig(local_endpoint="http://127.0.0.1:11434/api/generate", local_model="llama3.1"),

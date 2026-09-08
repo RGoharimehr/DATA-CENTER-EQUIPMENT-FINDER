@@ -220,13 +220,23 @@ def main() -> int:
         return 0
 
     if args.command == "build-db-from-pdf":
-        summary = build_database_from_pdf(
-            args.pdf_path,
-            args.db_path,
-            csv_path=args.csv_path,
-            max_pages=args.max_pages,
+        try:
+            summary = build_database_from_pdf(
+                args.pdf_path,
+                args.db_path,
+                csv_path=args.csv_path,
+                max_pages=args.max_pages,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"build-db-from-pdf failed: {exc}")
+            return 2
+        print(
+            f"Extracted {summary['rows']} rows from {summary['pdf_path']}\n"
+            f"  csv:    {summary['csv_path']}\n"
+            f"  sqlite: {summary['sqlite_path']}\n"
+            "Rows are marked unverified: a model extraction is not a checked "
+            "transcription. Confirm them against the datasheet before use."
         )
-        print(summary)
         return 0
 
     return 1

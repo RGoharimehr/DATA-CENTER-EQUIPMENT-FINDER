@@ -254,8 +254,19 @@ The package can read a PDF, ask a local AI model to map extracted content into t
 ### CLI
 
 ```bash
-dcef build-db-from-pdf vendor_catalog.pdf --db-path vendor_catalog.sqlite --csv-path vendor_catalog.csv
+# Point it at a document you actually have. dcef sync-catalogs puts the catalog's
+# cited datasheets in src/datacenter_equipment_finder/data/catalog_downloads/.
+dcef build-db-from-pdf path/to/vendor-datasheet.pdf \
+  --db-path vendor_catalog.sqlite --csv-path vendor_catalog.csv
 ```
+
+Rows produced this way are always written with `verification_status = unverified`,
+whatever the model claims. A model reading PDF text is making an extraction, not a
+checked transcription, and this command does not confirm anything against the
+document. Treat its output as a draft to review, not as catalog-ready data.
+
+The command exits 2 with a plain message if the file is missing, is not a PDF (a
+downloaded consent wall is the usual cause), or if no local model is configured.
 
 Optional page limit:
 
