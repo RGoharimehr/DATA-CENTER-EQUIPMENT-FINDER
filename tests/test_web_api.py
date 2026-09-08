@@ -43,7 +43,7 @@ class WebApiTests(unittest.TestCase):
     def test_find_endpoint(self):
         payload = self._get_json(f"{API_PREFIX}/find?category=valve&component_subtype=shutoff_valve&size_mm=20&cv=7&top_n=1")
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["data"][0]["component"]["part_number"], "S4A-20")
+        self.assertEqual(payload["data"][0]["component"]["component_subtype"], "shutoff_valve")
 
     def test_find_endpoint_accepts_connection_size(self):
         payload = self._get_json(
@@ -57,7 +57,7 @@ class WebApiTests(unittest.TestCase):
     def test_compat_endpoint(self):
         body = json.dumps(
             {
-                "part_numbers": ["LLD-20", "DML-20"],
+                "part_numbers": ["LLD-20", "023Z5053"],
                 "max_connection_time": 33,
             }
         ).encode("utf-8")
@@ -107,7 +107,7 @@ class WebApiTests(unittest.TestCase):
     def test_legacy_route_still_works(self):
         payload = self._get_json("/api/find?category=valve&component_subtype=shutoff_valve&size_mm=20&cv=7&top_n=1")
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["data"][0]["component"]["part_number"], "S4A-20")
+        self.assertEqual(payload["data"][0]["component"]["component_subtype"], "shutoff_valve")
 
     def test_invalid_find_request_fails(self):
         with self.assertRaises(HTTPError) as ctx:

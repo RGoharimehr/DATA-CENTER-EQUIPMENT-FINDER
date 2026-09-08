@@ -29,8 +29,11 @@ def _weights(category: Optional[str]) -> dict[str, float]:
 
 
 # Rows that have not been checked against their source document lose ties but can
-# still win on merit.
+# still win on merit. A row the vendor literature actively contradicts is pushed
+# further down, but still shown, so a stale catalog entry is visible rather than
+# quietly missing.
 UNVERIFIED_PENALTY = 0.05
+DISPUTED_PENALTY = 0.40
 
 
 def _criterion_delta(value: Optional[float], target: Optional[float]) -> Optional[float]:
@@ -98,7 +101,9 @@ def _rating_exclusions(
         elif component.max_temperature_c < required_temperature_c:
             return True, warnings
 
-    if component.verification_status != "verified":
+    if component.verification_status == "disputed":
+        warnings.append("vendor literature does not support this entry; confirm before specifying")
+    elif component.verification_status != "verified":
         warnings.append("specifications not verified against a source document")
 
     return False, warnings
@@ -165,7 +170,9 @@ def find_closest_components(
         add(_criterion_delta(c.capacity_kw, target_capacity_kw), w["capacity"])
 
         score = weighted / total_weight if total_weight else 0.0
-        if c.verification_status != "verified":
+        if c.verification_status == "disputed":
+            score += DISPUTED_PENALTY
+        elif c.verification_status != "verified":
             score += UNVERIFIED_PENALTY
 
         scored.append(MatchResult(component=c, score=score, warnings=tuple(warnings)))

@@ -375,7 +375,10 @@ Lower is better.
 Every row carries a `verification_status`:
 
 - `verified` - each figure was read from the document in `datasheet_url`.
-- `unverified` - the row has not been checked against a source. Confirm before relying on it.
+- `unverified` - not yet checked against a source. Confirm before relying on it.
+- `disputed` - checked, and the vendor literature does not support it. Kept visible so a
+  stale entry is obvious rather than quietly missing, but heavily penalised in ranking
+  and flagged with a warning in every result.
 
 Filter to trustworthy rows only:
 
@@ -394,6 +397,11 @@ this field exists:
 | `NC-CDU-300`, 300 kW | No such model. Accelsius ships NeuCool MR250 (250 kW) and IR150. |
 | `DCS-1600` | Not an Airedale designation. TurboChill DCS models are TCF13R18K, TCF24R24G, TCC14R28K. |
 | `LXDU-450`, 450 kW, NPT | Vertiv XDU450, 453 kW at 4 C approach, 2.5 in hygienic flange. |
+| `HPCS-1200`, 1200 kW | The whole Liebert HPC-S range tops out near 408 kW - roughly a third of the claimed figure. |
+| `DML-20`, 3/4 in, 120 C | Danfoss publishes no 3/4 in DML. The range is 1/4 to 5/8 in and the operating limit is 70 C, not 120 C. |
+| `A4A-20`, angle valve, Cv 4.4, 40 bar, 121 C | A4A is an Adaptomode pressure regulator. At 20 mm: Cv 7.2, 27.6 bar, 105 C. |
+| `S4A-20`, `CK2-32` | Not found in the Parker bulletins covering these families; the original citation was a reseller page. Marked `disputed`. |
+| `CTV-DC-3500` | CenTraVac is real (CVHF/CVHE/CVHG/CDHF, 165-3950 tons) but this is not a Trane designation. Marked `disputed`. |
 
 ### Data provenance rules
 

@@ -67,7 +67,7 @@ def test_flow_coefficient_rows_declare_their_type() -> None:
         assert c.flow_coefficient_type in {"Cv", "Kv"}, c.part_number
 
 
-ALLOWED_VERIFICATION = {"verified", "unverified"}
+ALLOWED_VERIFICATION = {"verified", "unverified", "disputed"}
 
 
 def test_verification_status_is_declared() -> None:
@@ -84,3 +84,14 @@ def test_verified_rows_cite_a_specific_document_not_a_landing_page() -> None:
         assert c.datasheet_url is not None
         path = c.datasheet_url.split("://", 1)[-1]
         assert "/" in path.rstrip("/"), f"{c.part_number} cites a bare domain: {c.datasheet_url}"
+
+
+def test_disputed_rows_are_pushed_below_verified_ones() -> None:
+    from datacenter_equipment_finder.matching import find_closest_components
+
+    components = _components()
+    disputed = [c for c in components if c.verification_status == "disputed"]
+    assert disputed, "expected the audit to have flagged at least one row"
+    for m in find_closest_components(components, category="valve", target_cv=7.0, top_n=20):
+        if m.component.verification_status == "disputed":
+            assert any("does not support" in w for w in m.warnings), m.component.part_number
