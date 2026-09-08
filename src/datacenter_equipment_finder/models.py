@@ -30,9 +30,16 @@ class EquipmentComponent:
     source_page: Optional[str]
     datasheet_url: Optional[str]
     baseline_references: Optional[str]
+    # "verified": every figure was read from the cited document.
+    # "unverified": not yet checked against a source.
+    # "disputed": checked, and the vendor literature does not support it.
+    verification_status: str = "unverified"
 
 
 @dataclass(frozen=True)
 class MatchResult:
     component: EquipmentComponent
     score: float
+    # Non-fatal caveats: an unpublished rating that could not be checked against
+    # the stated duty, or a row whose specs are unverified.
+    warnings: tuple[str, ...] = ()

@@ -1,1 +1,0 @@
-datacenter_equipment_finder

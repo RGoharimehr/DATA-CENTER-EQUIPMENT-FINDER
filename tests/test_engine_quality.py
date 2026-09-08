@@ -1,0 +1,271 @@
+"""Regression tests for the matching and query-parsing engine.
+
+Each test here corresponds to a defect found by probing the engine with realistic
+queries, so they are written as behaviour assertions rather than fixed part numbers.
+"""
+
+from datacenter_equipment_finder import EquipmentCatalog, EquipmentService
+from datacenter_equipment_finder.assistant import _best_brand, local_parse_query, run_assistant_query
+from datacenter_equipment_finder.matching import find_closest_components
+
+
+def _service() -> EquipmentService:
+    return EquipmentService(EquipmentCatalog.from_csv())
+
+
+# --- duty limits -----------------------------------------------------------------
+
+def test_pressure_duty_excludes_under_rated_parts() -> None:
+    catalog = _service().catalog
+    matches = find_closest_components(
+        catalog.components, category="quick_disconnect", target_cv=2.4,
+        required_pressure_bar=15.0, top_n=10,
+    )
+    assert matches
+    for m in matches:
+        rating = m.component.pressure_rating_bar
+        assert rating is None or rating >= 15.0, f"{m.component.part_number} is rated {rating} bar"
+
+
+def test_temperature_duty_excludes_under_rated_parts() -> None:
+    catalog = _service().catalog
+    matches = find_closest_components(
+        catalog.components, category="quick_disconnect", target_cv=2.4,
+        required_temperature_c=70.0, top_n=10,
+    )
+    assert matches
+    for m in matches:
+        tmax = m.component.max_temperature_c
+        assert tmax is None or tmax >= 70.0, f"{m.component.part_number} tops out at {tmax} C"
+
+
+def test_unpublished_rating_is_kept_but_flagged() -> None:
+    # An unknown rating cannot be proven inadequate, so the row survives with a warning
+    # rather than being silently dropped or silently trusted.
+    catalog = _service().catalog
+    matches = find_closest_components(
+        catalog.components, category="cdu", target_capacity_kw=1000,
+        required_pressure_bar=8.0, top_n=10,
+    )
+    unpublished = [m for m in matches if m.component.pressure_rating_bar is None]
+    assert unpublished, "expected at least one row without a published pressure rating"
+    for m in unpublished:
+        assert any("pressure rating not published" in w for w in m.warnings)
+
+
+def test_impossible_duty_reports_rather_than_returning_junk() -> None:
+    result = run_assistant_query("quick disconnect rated for 40 bar", _service(), mode="local")
+    assert result["matches"] == []
+    assert any("No catalog component is rated for" in c for c in result["checks"])
+
+
+# --- ranking ---------------------------------------------------------------------
+
+def test_missing_data_does_not_beat_a_reasonable_match() -> None:
+    catalog = _service().catalog
+    with_capacity = [c for c in catalog.components if c.capacity_kw is not None]
+    best = find_closest_components(with_capacity, category="cdu", target_capacity_kw=1000, top_n=1)[0]
+    # A row 10% from target must beat a row with no capacity figure at all.
+    assert best.component.capacity_kw is not None
+    assert best.score < 0.75
+
+
+def test_primary_criterion_outweighs_connection_size() -> None:
+    # A CDU three times off the requested duty must not win on connection size alone.
+    catalog = _service().catalog
+    top = find_closest_components(
+        catalog.components, category="cdu", component_subtype="in_row_cdu",
+        target_connection_size_inch=2.5, target_capacity_kw=1000, top_n=1,
+    )[0]
+    assert top.component.capacity_kw is not None
+    assert abs(top.component.capacity_kw - 1000) / 1000 < 0.5
+
+
+def test_unverified_rows_are_flagged_in_results() -> None:
+    catalog = _service().catalog
+    matches = find_closest_components(catalog.components, category="cdu", target_capacity_kw=1000, top_n=10)
+    for m in matches:
+        if m.component.verification_status != "verified":
+            assert any("not verified" in w for w in m.warnings), m.component.part_number
+
+
+def test_scores_are_relative_error_so_a_close_match_scores_near_zero() -> None:
+    catalog = _service().catalog
+    top = find_closest_components(
+        catalog.components, category="quick_disconnect", target_cv=2.45,
+        required_pressure_bar=15.0, top_n=1,
+    )[0]
+    assert top.score < 0.05
+
+
+# --- query parsing ---------------------------------------------------------------
+
+def test_brand_is_not_invented_from_unrelated_words() -> None:
+    service = _service()
+    brands = service.schema()["brands"]
+    for query in (
+        "show me a strainer",              # previously matched Trane
+        "cooling unit 500 kw",             # previously matched CoolIT
+        "give me a strainer with low pressure drop",
+        "coolant distribution unit",
+        "dry break connector",
+    ):
+        assert _best_brand(query, brands) is None, query
+
+
+def test_brand_still_survives_a_typo() -> None:
+    brands = _service().schema()["brands"]
+    assert _best_brand("parkar chek valve", brands) == "Parker"
+    assert _best_brand("danfos ball valve", brands) == "Danfoss"
+
+
+def test_megawatt_queries_are_understood() -> None:
+    service = _service()
+    assert local_parse_query("cdu for a 1 MW rack row", service)["capacity_kw"] == 1000.0
+    assert local_parse_query("something for 2 megawatt heat load", service)["capacity_kw"] == 2000.0
+
+
+def test_duty_limits_are_parsed_from_natural_language() -> None:
+    service = _service()
+    assert local_parse_query("quick disconnect rated for 15 bar", service)["required_pressure_bar"] == 15.0
+    assert local_parse_query("UQD for 70 C coolant temperature", service)["required_temperature_c"] == 70.0
+
+
+def test_rating_conditions_are_not_mistaken_for_duty_limits() -> None:
+    # "1350 kW at 4 C approach" states the condition a capacity is quoted at, not a
+    # coolant temperature the part must withstand.
+    filters = local_parse_query("cdu 1350 kw at 4 C approach", _service())
+    assert filters["required_temperature_c"] is None
+    assert filters["capacity_kw"] == 1350.0
+
+
+def test_psi_is_converted_to_bar() -> None:
+    filters = local_parse_query("quick disconnect for a 150 psi system", _service())
+    assert filters["required_pressure_bar"] is not None
+    assert abs(filters["required_pressure_bar"] - 10.34) < 0.05
+
+
+def test_every_category_publishes_how_to_select_it() -> None:
+    # A careless edit once dropped filter_dryer, cdu and chiller out of input_hints and
+    # into duty_limits, and the /schema endpoint served that for several commits
+    # because nothing asserted its shape.
+    schema = _service().schema()
+    for category in schema["categories"]:
+        assert category in schema["input_hints"], f"{category} has no input hints"
+        assert schema["input_hints"][category], category
+
+
+def test_duty_limits_lists_only_duty_limits() -> None:
+    schema = _service().schema()
+    assert set(schema["duty_limits"]) == {"required_pressure_bar", "required_temperature_c"}
+    for description in schema["duty_limits"].values():
+        assert isinstance(description, str)
+
+
+def test_capacity_is_ignored_for_components_not_rated_in_kw() -> None:
+    # "quick disconnect for a 1 MW rack loop" previously returned the smallest coupling
+    # in the catalog, because capacity was applied to a component that has none.
+    filters = local_parse_query("quick disconnect for a 1 MW rack loop", _service())
+    assert filters["capacity_kw"] is None
+    assert any("Capacity was ignored" in c for c in filters["checks"])
+
+
+# --- selection against a required value (the design-tool path) --------------------
+
+def test_a_part_below_the_required_kv_is_not_a_candidate() -> None:
+    # SIZING_BASIS section 4: a candidate is one whose Kvs is at or above the required
+    # value. Nearest-match ranking offered valves that cannot pass the design flow at
+    # the allocated pressure drop.
+    catalog = _service().catalog
+    matches = find_closest_components(catalog.components, category="valve", required_kv=7.2, top_n=20)
+    assert matches
+    for m in matches:
+        c = m.component
+        if c.flow_coefficient_value is None:
+            continue
+        available = c.flow_coefficient_value
+        if (c.flow_coefficient_type or "").lower() == "cv":
+            available *= 0.865052
+        assert available >= 7.2 - 1e-9, f"{c.part_number} at {available} is undersized"
+
+
+def test_a_shortlist_is_ordered_by_least_oversize() -> None:
+    catalog = _service().catalog
+    matches = find_closest_components(
+        catalog.components, category="cdu", required_capacity_kw=1000.0, top_n=5
+    )
+    capacities = [m.component.capacity_kw for m in matches if m.component.capacity_kw]
+    assert capacities == sorted(capacities), capacities
+    assert capacities[0] >= 1000.0
+
+
+def test_gross_oversize_is_flagged_rather_than_presented_as_a_fit() -> None:
+    catalog = _service().catalog
+    top = find_closest_components(
+        catalog.components, category="valve", required_kv=16.2, minimum_size_mm=50.8, top_n=1
+    )[0]
+    assert any("the catalogue may hold no closer size" in w for w in top.warnings), top.warnings
+
+
+def test_an_unpublished_coefficient_is_flagged_not_assumed_adequate() -> None:
+    catalog = _service().catalog
+    matches = find_closest_components(catalog.components, category="cdu", required_capacity_kw=100.0, top_n=20)
+    unknown = [m for m in matches if m.component.capacity_kw is None]
+    for m in unknown:
+        assert any("cannot confirm" in w for w in m.warnings)
+
+
+def test_select_for_duty_reports_what_it_could_not_resolve() -> None:
+    report = _service().select_for_duty(
+        [
+            {"tag": "CDU-1", "category": "cdu", "required_capacity_kw": 2000.0},
+            {"tag": "IMPOSSIBLE", "category": "valve", "required_kv": 99999.0},
+        ]
+    )
+    assert report["unresolved"] == ["IMPOSSIBLE"]
+    impossible = [i for i in report["items"] if i["tag"] == "IMPOSSIBLE"][0]
+    assert impossible["candidates"] == []
+    assert impossible["unmet"] == ["required Kv 99999"]
+
+
+def test_the_assembly_envelope_is_computed_per_loop() -> None:
+    # TCS and FWS meet only across the CDU's thermal coupling. Treating every selected
+    # part as one assembly reports a governing pressure for a circuit that does not
+    # exist, which SIZING_BASIS section 3 warns against.
+    report = _service().select_for_duty(
+        [
+            {"tag": "TCS-QD", "loop": "TCS", "category": "quick_disconnect", "required_kv": 2.0},
+            {"tag": "TCS-VALVE", "loop": "TCS", "category": "valve", "required_kv": 5.0},
+            {"tag": "FWS-STRAINER", "loop": "FWS", "category": "strainer", "required_kv": 10.0},
+        ]
+    )
+    assert set(report["assemblies_by_loop"]) == {"TCS"}, report["assemblies_by_loop"]
+    assert "governing_pressure_bar" in report["assemblies_by_loop"]["TCS"]["limits"]
+
+
+def test_an_unassigned_duty_is_reported_not_guessed() -> None:
+    report = _service().select_for_duty(
+        [
+            {
+                "tag": "TCS-isolation_valve-2in",
+                "category": "valve",
+                "minimum_size_mm": 50.8,
+                "duty_unassigned": "the schedule reports manual geometry sizing and no valve Cv",
+            }
+        ]
+    )
+    assert report["unresolved"] == ["TCS-isolation_valve-2in"]
+    assert report["items"][0]["candidates"] == []
+    assert "manual geometry sizing" in report["items"][0]["unmet"][0]
+
+
+def test_wetted_material_is_a_requirement_not_a_preference() -> None:
+    report = _service().select_for_duty(
+        [{"tag": "CU", "category": "valve", "required_kv": 5.0, "required_material": "Copper"}]
+    )
+    for candidate in report["items"][0]["candidates"]:
+        material = candidate["component"].get("material")
+        if material:
+            assert "copper" in material.lower() or any(
+                "not published" in w for w in candidate["warnings"]
+            ), material

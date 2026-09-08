@@ -3,7 +3,11 @@ from __future__ import annotations
 MM_PER_INCH = 25.4
 KW_PER_TON = 3.5168525
 PSI_PER_BAR = 14.5037738
-KV_PER_CV = 0.865
+# Cv here is always Cv (US). Spirax Sarco's DCV4 datasheet gives Cv(US) = 1.156 * Kv,
+# so Kv = Cv / 1.156 = 0.8651 * Cv. Label the unit explicitly wherever it is reported:
+# Cv (US) and Cv (UK) differ, and a catalogue that does not say which is ambiguous.
+CV_US_PER_KV = 1.156
+KV_PER_CV = 1.0 / CV_US_PER_KV
 
 
 def mm_to_inch(mm: float) -> float:

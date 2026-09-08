@@ -1,2 +1,25 @@
 __pycache__/
 *.py[cod]
+
+# Environments. Keep these out of the tree: this folder may be shared between
+# machines with different Python versions, and a committed venv breaks both.
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# OS noise
+.DS_Store
+
+# Vendor documents fetched by "dcef sync-catalogs". These are third-party
+# publications cached locally for ingestion; they are not ours to redistribute
+# and would add tens of megabytes of binaries to the history. The catalog cites
+# each one by URL, so anyone can re-fetch them.
+src/datacenter_equipment_finder/data/catalog_downloads/

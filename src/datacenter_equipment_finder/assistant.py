@@ -10,8 +10,30 @@ from urllib.request import Request, urlopen
 
 from rapidfuzz import fuzz
 
+from .matching import FLOW_COEFFICIENT_CATEGORIES
 from .service import EquipmentService
 from .units import inch_to_mm
+
+
+# Terms engineers actually type, mapped to the catalog category they mean.
+CATEGORY_ALIASES: dict[str, tuple[str, ...]] = {
+    "quick_disconnect": (
+        "uqd",
+        "uqdb",
+        "quick disconnect",
+        "quick connect",
+        "quick coupling",
+        "dry break",
+        "drybreak",
+        "blind mate",
+        "coupling",
+        "connector",
+    ),
+}
+
+SUBTYPE_ALIASES: dict[str, tuple[str, ...]] = {
+    "blind_mate_uqd": ("uqdb", "blind mate", "blindmate"),
+}
 
 
 @dataclass(frozen=True)
@@ -21,7 +43,12 @@ class AssistantConfig:
     local_endpoint: str | None = None
     local_model: str | None = None
     local_api_key: str | None = None
+    # Tuned for parsing a one-line query.
     timeout_seconds: int = 12
+    # Whole-document extraction is a different job: a local 8B model loading into
+    # memory and then emitting JSON for a page of catalog text takes minutes, not
+    # seconds, and the first call after a pull pays the load cost as well.
+    pdf_timeout_seconds: int = 600
 
 
 def default_assistant_config() -> AssistantConfig:
@@ -32,6 +59,7 @@ def default_assistant_config() -> AssistantConfig:
         local_model=os.environ.get("DCEF_LOCAL_AI_MODEL"),
         local_api_key=os.environ.get("DCEF_LOCAL_AI_API_KEY"),
         timeout_seconds=int(os.environ.get("DCEF_AI_TIMEOUT_SECONDS", "12")),
+        pdf_timeout_seconds=int(os.environ.get("DCEF_PDF_AI_TIMEOUT_SECONDS", "600")),
     )
 
 
@@ -76,6 +104,39 @@ def _best_schema_term(text: str, candidates: list[str], *, minimum_score: float 
     if best_candidate is not None and best_score >= minimum_score:
         return best_candidate
     return None
+
+
+def _match_alias(text: str, aliases: dict[str, tuple[str, ...]], allowed: list[str]) -> str | None:
+    normalized = _normalize_text(text)
+    best: str | None = None
+    best_len = 0
+    for target, terms in aliases.items():
+        if target not in allowed:
+            continue
+        for term in terms:
+            if term in normalized and len(term) > best_len:
+                best = target
+                best_len = len(term)
+    return best
+
+
+def _best_brand(text: str, brands: list[str], *, minimum_score: float = 82.0) -> str | None:
+    for brand in brands:
+        if _contains_term(text, brand):
+            return brand
+
+    tokens = [t for t in _tokenize(_normalize_text(text)) if len(t) >= 4]
+    best: str | None = None
+    best_score = 0.0
+    for brand in brands:
+        lowered = brand.lower()
+        if len(lowered) < 4:
+            continue
+        for token in tokens:
+            score = fuzz.ratio(lowered, token)
+            if score > best_score:
+                best, best_score = brand, score
+    return best if best_score >= minimum_score else None
 
 
 def _tokenize(text: str) -> list[str]:
@@ -138,7 +199,38 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _parse_fractional_inches(raw: str) -> float | None:
+    raw = raw.strip()
+    if "/" in raw:
+        whole = 0.0
+        parts = raw.split()
+        if len(parts) == 2:
+            leading = _as_float(parts[0])
+            if leading is None:
+                return None
+            whole = leading
+            raw = parts[1]
+        numerator, _, denominator = raw.partition("/")
+        num = _as_float(numerator)
+        den = _as_float(denominator)
+        if num is None or den in (None, 0.0):
+            return None
+        assert den is not None
+        return whole + num / den
+    return _as_float(raw)
+
+
 def _extract_connection_size(text: str) -> tuple[float | None, float | None]:
+    fraction = re.search(
+        r"(?:(\d+)\s+)?(\d+\s*/\s*\d+)\s*(?:in\b|inch|inches|\")",
+        text,
+    )
+    if fraction:
+        raw = (fraction.group(1) + " " if fraction.group(1) else "") + fraction.group(2).replace(" ", "")
+        value = _parse_fractional_inches(raw)
+        if value is not None:
+            return inch_to_mm(value), value
+
     patterns = (
         r"(?:pipe|piping|connection|port|line|diameter|dn)\s*(?:size)?\s*(?:of|=|:)?\s*(\d+(?:\.\d+)?)\s*(mm|millimeter|millimeters|in|inch|inches|\")",
         r"(\d+(?:\.\d+)?)\s*(mm|millimeter|millimeters|in|inch|inches|\")\s*(?:pipe|piping|connection|port|line|diameter|id|od|dn)",
@@ -155,6 +247,32 @@ def _extract_connection_size(text: str) -> tuple[float | None, float | None]:
             return value, None
         return inch_to_mm(value), value
     return None, None
+
+
+def _extract_required_pressure_bar(text: str) -> float | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(bar|barg|psi|psig)\b", text)
+    if not match:
+        return None
+    value = _as_float(match.group(1))
+    if value is None:
+        return None
+    return value if match.group(2).startswith("bar") else value / 14.5037738
+
+
+def _extract_required_temperature_c(text: str) -> float | None:
+    # Only treat a temperature as a duty requirement when the query frames it as one.
+    # "1350 kW at 4 C approach" states a rating condition, not a coolant temperature.
+    if not re.search(r"coolant|fluid|water|temperature|supply|return|hot|deg", text):
+        return None
+    if re.search(r"\bapproach\b", text):
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(?:deg(?:rees)?\s*)?(?:\u00b0\s*)?(c|celsius|f|fahrenheit)\b", text)
+    if not match:
+        return None
+    value = _as_float(match.group(1))
+    if value is None:
+        return None
+    return value if match.group(2).startswith(("c", "celsius")) else (value - 32.0) * 5.0 / 9.0
 
 
 def _infer_category_from_subtype(service: EquipmentService, component_subtype: str | None) -> str | None:
@@ -177,6 +295,16 @@ def _validate_local_filters(filters: dict[str, Any]) -> list[str]:
         filters["cv"] = None
         filters["kv"] = None
         checks.append("Cv/Kv inputs were ignored because they do not apply to CDU, chiller, or filter_dryer searches.")
+    if filters.get("category") in FLOW_COEFFICIENT_CATEGORIES and (
+        filters.get("capacity_kw") is not None or filters.get("capacity_tons") is not None
+    ):
+        filters["capacity_kw"] = None
+        filters["capacity_tons"] = None
+        checks.append(
+            "Capacity was ignored because a valve, strainer or quick disconnect is not "
+            "rated in kW. Size these on flow coefficient and connection size, and note "
+            "that a large loop needs several of them."
+        )
     if filters.get("connection_size_inch") is not None and filters.get("connection_size_mm") is None:
         filters["connection_size_mm"] = inch_to_mm(filters["connection_size_inch"])
         checks.append("Converted connection size from inches to millimeters for local matching.")
@@ -191,7 +319,8 @@ def _local_model_prompt(text: str, service: EquipmentService) -> str:
     return (
         "Extract structured filters for the Data Center Equipment Finder.\n"
         "Return JSON only with keys: category, component_subtype, brand, size_mm, cv, kv, capacity_kw, "
-        "capacity_tons, connection_size_mm, connection_size_inch, top_n.\n"
+        "capacity_tons, connection_size_mm, connection_size_inch, required_pressure_bar, "
+        "required_temperature_c, top_n.\n"
         "Use null for unknown values. Prefer catalog-supported categories and subtypes.\n"
         f"Categories: {schema['categories']}\n"
         f"Subtypes by category: {schema['subtypes_by_category']}\n"
@@ -257,6 +386,8 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
     schema = service.schema()
 
     category = _best_schema_term(t, schema["categories"], minimum_score=90.0)
+    if category is None:
+        category = _match_alias(t, CATEGORY_ALIASES, schema["categories"])
 
     component_subtype = None
     if category:
@@ -266,17 +397,25 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
             component_subtype = _best_schema_term(t, subtypes, minimum_score=88.0)
             if component_subtype:
                 break
+    if component_subtype is None and category:
+        component_subtype = _match_alias(t, SUBTYPE_ALIASES, schema["subtypes_by_category"].get(category, []))
     if category is None:
         category = _infer_category_from_subtype(service, component_subtype)
 
-    brand = _best_schema_term(t, schema["brands"], minimum_score=78.0)
+    brand = _best_brand(t, schema["brands"])
 
     size_mm = _extract_before_unit(tokens, {"mm"})
     cv = _extract_prefixed_value(tokens, "cv")
     kv = _extract_prefixed_value(tokens, "kv")
     capacity_kw = _extract_before_unit(tokens, {"kw", "kilowatt", "kilowatts"})
+    if capacity_kw is None:
+        megawatts = _extract_before_unit(tokens, {"mw", "megawatt", "megawatts"})
+        if megawatts is not None:
+            capacity_kw = megawatts * 1000.0
     capacity_tons = _extract_before_unit(tokens, {"tr", "ton", "tons"})
     connection_size_mm, connection_size_inch = _extract_connection_size(t)
+    required_pressure_bar = _extract_required_pressure_bar(t)
+    required_temperature_c = _extract_required_temperature_c(t)
     top_n = _extract_top_n(tokens, default=5)
 
     filters: dict[str, Any] = {
@@ -290,6 +429,8 @@ def local_parse_query(text: str, service: EquipmentService) -> dict[str, Any]:
         "capacity_tons": capacity_tons,
         "connection_size_mm": connection_size_mm,
         "connection_size_inch": connection_size_inch,
+        "required_pressure_bar": required_pressure_bar,
+        "required_temperature_c": required_temperature_c,
         "top_n": max(1, min(top_n, 20)),
     }
     filters["checks"] = _validate_local_filters(filters)
@@ -378,8 +519,28 @@ def run_assistant_query(
         capacity_tons=filters.get("capacity_tons"),
         connection_size_mm=filters.get("connection_size_mm"),
         connection_size_inch=filters.get("connection_size_inch"),
+        required_pressure_bar=filters.get("required_pressure_bar"),
+        required_temperature_c=filters.get("required_temperature_c"),
         top_n=int(filters.get("top_n") or 5),
     )
+
+    ranking_inputs = ("size_mm", "cv", "kv", "capacity_kw", "capacity_tons", "connection_size_mm")
+    if matches and not any(filters.get(key) is not None for key in ranking_inputs):
+        filters["checks"] = list(filters.get("checks", [])) + [
+            "No sizing criterion was given, so these are not ranked. Add a Cv/Kv, a "
+            "size or a capacity to order them."
+        ]
+
+    if not matches:
+        limits = []
+        if filters.get("required_pressure_bar") is not None:
+            limits.append(f"{float(filters['required_pressure_bar']):g} bar")
+        if filters.get("required_temperature_c") is not None:
+            limits.append(f"{float(filters['required_temperature_c']):g} C")
+        if limits:
+            filters["checks"] = list(filters.get("checks", [])) + [
+                "No catalog component is rated for " + " and ".join(limits) + "."
+            ]
 
     return {
         "mode_requested": normalized_mode,

@@ -52,6 +52,8 @@ class FindQuery(_BaseRequestModel):
     kv: float | None = None
     capacity_kw: float | None = None
     capacity_tons: float | None = None
+    required_pressure_bar: float | None = None
+    required_temperature_c: float | None = None
     top_n: int = Field(default=5, ge=1, le=100)
 
     @field_validator(
@@ -62,6 +64,7 @@ class FindQuery(_BaseRequestModel):
         "kv",
         "capacity_kw",
         "capacity_tons",
+        "required_pressure_bar",
     )
     @classmethod
     def _non_negative(cls, value: float | None, info: ValidationInfo) -> float | None:
@@ -98,6 +101,8 @@ class CompatibilityRequest(_BaseRequestModel):
     required_material: str | None = None
     required_connection_standard: str | None = None
     required_coolant: str | None = None
+    required_pressure_bar: float | None = None
+    required_temperature_c: float | None = None
 
     @field_validator("part_numbers")
     @classmethod
@@ -117,3 +122,23 @@ class CompatibilityRequest(_BaseRequestModel):
 def validation_message(exc: ValidationError) -> str:
     first_error = exc.errors()[0]
     return str(first_error.get("msg", "invalid request"))
+
+
+class DutyItem(_BaseRequestModel):
+    tag: str | None = None
+    category: str | None = None
+    component_subtype: str | None = None
+    brand: str | None = None
+    required_cv: float | None = None
+    required_kv: float | None = None
+    required_capacity_kw: float | None = None
+    minimum_size_mm: float | None = None
+    connection_size_mm: float | None = None
+    connection_size_inch: float | None = None
+    required_pressure_bar: float | None = None
+    required_temperature_c: float | None = None
+
+
+class SelectRequest(_BaseRequestModel):
+    items: list[DutyItem]
+    top_n: int = Field(default=3, ge=1, le=50)
