@@ -70,6 +70,11 @@ def test_incompatible_coolant_is_still_caught() -> None:
 
 def test_unverified_and_disputed_parts_are_surfaced() -> None:
     report = _service().compatibility(["CK2-32"])
+    assert any("not verified" in n for n in report["notes"])
+
+
+def test_disputed_parts_carry_a_stronger_warning() -> None:
+    report = _service().compatibility(["CTV-DC-3500"])
     assert any("does not support" in n for n in report["notes"])
 
 

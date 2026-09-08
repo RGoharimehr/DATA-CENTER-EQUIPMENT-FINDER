@@ -408,7 +408,9 @@ Every row carries a `verification_status`:
 
 - `verified` - each figure was read from the document in `datasheet_url`.
 - `unverified` - not yet checked against a source. Confirm before relying on it.
-- `disputed` - checked, and the vendor literature does not support it. Kept visible so a
+- `disputed` - checked against the cited literature, which does not support it.
+  Treat this as "contradicted so far", not "proven false": a wider document can
+  clear a row, as Parker Catalog CC-11c did for `S4A-20` and `CK2-32`. Kept visible so a
   stale entry is obvious rather than quietly missing, but heavily penalised in ranking
   and flagged with a warning in every result.
 
@@ -431,8 +433,8 @@ this field exists:
 | `LXDU-450`, 450 kW, NPT | Vertiv XDU450, 453 kW at 4 C approach, 2.5 in hygienic flange. |
 | `HPCS-1200`, 1200 kW | The whole Liebert HPC-S range tops out near 408 kW - roughly a third of the claimed figure. |
 | `DML-20`, 3/4 in, 120 C | Danfoss publishes no 3/4 in DML. The range is 1/4 to 5/8 in and the operating limit is 70 C, not 120 C. |
-| `A4A-20`, angle valve, Cv 4.4, 40 bar, 121 C | A4A is an Adaptomode pressure regulator. At 20 mm: Cv 7.2, 27.6 bar, 105 C. |
-| `S4A-20`, `CK2-32` | Not found in the Parker bulletins covering these families; the original citation was a reseller page. Marked `disputed`. |
+| `A4A-20`, angle valve, Cv 4.4, 40 bar, 121 C | A4A is a flanged-body pressure regulator series, 20-100 mm. At 20 mm: Cv 7.2, 27.6 bar, 105 C. |
+| `S4A-20`, `CK2-32` | Both are real Parker types - S4A is a solenoid valve, CK2 a check valve - and appear in Catalog CC-11c. Their Cv values are still unconfirmed, so they are `unverified`. An earlier pass marked them `disputed` on the strength of two bulletins that simply do not cover these families; checking the catalog itself corrected that. |
 | `CTV-DC-3500` | CenTraVac is real (CVHF/CVHE/CVHG/CDHF, 165-3950 tons) but this is not a Trane designation. Marked `disputed`. |
 
 ### Data provenance rules
