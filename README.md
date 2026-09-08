@@ -464,6 +464,23 @@ dcef build-db
 dcef export-web-catalog
 ```
 
+`sync-catalogs` reports each URL individually and exits non-zero if any failed:
+
+```text
+  ok           1244 KB  https://assets.danfoss.com/.../AI222586432958en-US1102.pdf
+  FAILED   HTTP 403 Forbidden  https://www.vertiv.com/.../vertiv-xdu450-cdu-ds-en-na-sl-07622-web.pdf
+
+12 downloaded, 1 already present, 14 failed, 27 total
+```
+
+It sends a browser user agent, because several vendor CDNs reject the default urllib
+agent, and flags a PDF link that answers with HTML - usually a consent wall returned
+as a 200, which silently corrupts the ingestion input.
+
+Note that `.venv` in this directory is the only environment the tooling assumes. If you
+share this folder between machines with different Python versions, keep separate
+virtual environments outside the repository rather than one `.venv` inside it.
+
 ## GitHub Pages website
 
 Static website source:

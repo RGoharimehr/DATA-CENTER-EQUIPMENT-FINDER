@@ -59,3 +59,29 @@ def test_docs_site_catalog_is_in_sync() -> None:
     assert len(published) == len(EquipmentCatalog.from_csv().components), (
         "docs/equipment_catalog.json is stale; run 'dcef export-web-catalog'"
     )
+
+
+def test_sync_reports_every_url_individually(tmp_path) -> None:
+    """A bare 'failed: 14' gives no way to tell a dead link from a blocked agent."""
+    import csv as _csv
+
+    from datacenter_equipment_finder.catalog import FIELD_NAMES
+    from datacenter_equipment_finder.catalog_tools import _safe_file_name, download_catalogs
+
+    url = "https://example.invalid/datasheets/widget.pdf"
+    csv_path = tmp_path / "catalog.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = _csv.DictWriter(f, fieldnames=FIELD_NAMES)
+        writer.writeheader()
+        writer.writerow({name: "" for name in FIELD_NAMES} | {"part_number": "X", "datasheet_url": url})
+
+    out = tmp_path / "downloads"
+    out.mkdir()
+    # Pre-place the target so the call resolves without touching the network.
+    (out / _safe_file_name(url)).write_bytes(b"%PDF-1.4 stub")
+
+    summary = download_catalogs(csv_path, out)
+    assert summary["total"] == 1
+    assert summary["skipped"] == 1
+    assert [r["url"] for r in summary["results"]] == [url]
+    assert summary["results"][0]["status"] == "skipped"

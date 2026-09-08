@@ -4,10 +4,12 @@ import csv
 import hashlib
 import json
 import sqlite3
+from collections import Counter
 from pathlib import Path
-from urllib.error import URLError
+from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from .catalog import FIELD_NAMES
 
@@ -27,7 +29,31 @@ def _safe_file_name(url: str) -> str:
     return f"{digest}_{base}"
 
 
-def download_catalogs(csv_path: str | Path, output_dir: str | Path, *, limit: int | None = None, timeout: int = 20) -> dict[str, int]:
+# Vendor document hosts sit behind CDNs that reject the default urllib agent, which
+# is why a plain urlopen failed on roughly half of the catalog's URLs while the same
+# links open fine in a browser.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def download_catalogs(
+    csv_path: str | Path,
+    output_dir: str | Path,
+    *,
+    limit: int | None = None,
+    timeout: int = 20,
+) -> dict[str, Any]:
+    """Download every datasheet URL in the catalog.
+
+    Reports the outcome of each URL rather than a bare failure count: a silent
+    "failed: 14" gives no way to tell a dead link from a blocked user agent.
+    """
     urls = list_catalog_urls(csv_path)
     if limit is not None:
         urls = urls[: max(0, limit)]
@@ -35,27 +61,46 @@ def download_catalogs(csv_path: str | Path, output_dir: str | Path, *, limit: in
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    downloaded = 0
-    skipped = 0
-    failed = 0
+    results: list[dict[str, Any]] = []
 
     for url in urls:
         target = out / _safe_file_name(url)
         if target.exists():
-            skipped += 1
+            results.append({"url": url, "status": "skipped", "path": str(target)})
             continue
         try:
-            with urlopen(url, timeout=timeout) as resp:
-                target.write_bytes(resp.read())
-                downloaded += 1
-        except (URLError, TimeoutError, ValueError):
-            failed += 1
+            request = Request(url, headers=_BROWSER_HEADERS)
+            with urlopen(request, timeout=timeout) as resp:
+                body = resp.read()
+                content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip()
+        except HTTPError as exc:
+            results.append({"url": url, "status": "failed", "error": f"HTTP {exc.code} {exc.reason}"})
+            continue
+        except (URLError, TimeoutError, ValueError, OSError) as exc:
+            results.append({"url": url, "status": "failed", "error": str(exc)})
+            continue
 
+        target.write_bytes(body)
+        entry: dict[str, Any] = {
+            "url": url,
+            "status": "downloaded",
+            "path": str(target),
+            "bytes": len(body),
+            "content_type": content_type,
+        }
+        # A PDF link that answers with HTML is usually a consent wall or an error page
+        # dressed as a 200, and silently saving it corrupts the ingestion input.
+        if url.lower().endswith(".pdf") and not body.startswith(b"%PDF"):
+            entry["warning"] = f"expected a PDF but received {content_type or 'unknown content'}"
+        results.append(entry)
+
+    counts = Counter(r["status"] for r in results)
     return {
         "total": len(urls),
-        "downloaded": downloaded,
-        "skipped": skipped,
-        "failed": failed,
+        "downloaded": counts.get("downloaded", 0),
+        "skipped": counts.get("skipped", 0),
+        "failed": counts.get("failed", 0),
+        "results": results,
     }
 
 

@@ -193,8 +193,21 @@ def main() -> int:
 
     if args.command == "sync-catalogs":
         summary = download_catalogs(args.csv_path, args.output_dir, limit=args.limit)
-        print(summary)
-        return 0
+        for entry in summary["results"]:
+            if entry["status"] == "downloaded":
+                size_kb = entry["bytes"] / 1024
+                print(f"  ok       {size_kb:8.0f} KB  {entry['url']}")
+                if entry.get("warning"):
+                    print(f"           warning: {entry['warning']}")
+            elif entry["status"] == "skipped":
+                print(f"  present            {entry['url']}")
+            else:
+                print(f"  FAILED   {entry.get('error', 'unknown error')}  {entry['url']}")
+        print(
+            f"\n{summary['downloaded']} downloaded, {summary['skipped']} already present, "
+            f"{summary['failed']} failed, {summary['total']} total"
+        )
+        return 0 if summary["failed"] == 0 else 1
 
     if args.command == "build-db":
         count = build_sqlite_database(args.csv_path, args.db_path)
